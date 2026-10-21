@@ -59,12 +59,16 @@ First release: the whole application is a port of `djbb-lite` (Django 6.1) to La
   the form stops rejecting a shared address.
 - Front-end build tooling removed (`package.json`, `vite.config.js`, `resources/css`, `resources/js`);
   the CSS was inline in the Django template and stays inline.
+- **The board runs on its own Neon project now** (2026-10-21). All six migrations were applied to an
+  empty schema and `users` / `posts` / `comments` were copied over with their primary keys, hashes
+  and timestamps intact. The Django tables stayed in the database that was retired, so
+  `board:import-django` reports them missing on this connection and `ImportDjangoDataTest` skips.
 
 ### Notes
 
-- The Laravel tables live in the same schema as djbb-lite's. `config/database.php` lists the 12
-  Django tables under `dont_drop` so `migrate:fresh` cannot take them with it; no destructive
-  database command is ever appropriate against this connection.
+- The Laravel tables were first written into a schema shared with djbb-lite's. `config/database.php`
+  lists the 12 Django tables under `dont_drop` so `migrate:fresh` cannot take them with it; no
+  destructive database command is ever appropriate against a live board.
 - `2026_10_22_000000_add_avatar_to_users_table` is the first migration to alter a column on the live
   shared schema: it adds `users.avatar` nullable, backfills `id % 4` across the four presets, then
   re-declares it with `->change()` so Postgres sets `NOT NULL`. Laravel 13 does that natively — no

@@ -7,8 +7,11 @@ controllers, Blade views with inline CSS. No starter kit, no Node build step, no
 
 - **Postgres only.** `config/database.php` defines exactly one connection (`pgsql`) and throws at
   boot without a `DATABASE_URL`. Never reintroduce SQLite, and never add a `DB_CONNECTION` switch.
-- **The database is shared with the live djbb-lite app.** Never run `migrate:fresh`, `migrate:reset`,
-  or `db:wipe`. The Django tables are listed under `dont_drop` as a backstop, not as permission.
+- **This database holds live board data.** Never run `migrate:fresh`, `migrate:reset`, or
+  `db:wipe`. Since 2026-10-21 the connection points at a Neon project carrying only Laravel's
+  tables — djbb-lite stayed on the instance that was replaced — so `board:import-django` reports the
+  Django tables missing and `ImportDjangoDataTest` skips itself. The 12 tables stay listed under
+  `dont_drop` as a backstop for any database where they do coexist.
 - **Tests roll back, they do not migrate.** `tests/TestCase.php` uses `DatabaseTransactions`.
   Do not switch it to `RefreshDatabase`.
 - **Keep `PDO::ATTR_EMULATE_PREPARES => true`** in the pgsql connection. Neon's pooled endpoint is

@@ -83,9 +83,10 @@ headless server — `neon login` times out there. Take the string from the web c
 2. **`channel_binding` is not a Laravel connection key.** The stock `PostgresConnector` would drop
    it silently, leaving SCRAM channel binding off. `app/Database/Connectors/PostgresConnector.php`
    adds it to the DSN and is bound in `AppServiceProvider` under `db.connector.pgsql`.
-3. **This database is shared with djbb-lite.** `config/database.php` lists the 12 Django tables
+3. **`dont_drop` guards djbb-lite's tables.** `config/database.php` lists the 12 Django tables
    under `dont_drop`, so `migrate:fresh` and `db:wipe` skip them instead of deleting someone
-   else's board. Neither command is ever the right thing to run here anyway.
+   else's board. The current database has no Django tables at all, but neither command is ever the
+   right thing to run against a live board anyway.
 
 ## Setting up a database
 
@@ -184,7 +185,9 @@ outcome without the trap.
 
 ## Living with the Django app
 
-The two apps share one schema, each with its own tables, and both are live at the same time.
+The port was written to share one schema with djbb-lite, each app with its own tables. The database
+it runs against now (a fresh Neon project since 2026-10-21) holds only the Laravel tables, so the
+importer stands down until it is pointed at a database where the Django tables live.
 
 - **Passwords.** Imported rows carry `pbkdf2_sha256$iterations$salt$base64` verbatim.
   `app/Hashing/DjangoHasher.php` is registered as the `django` hash driver (`config/hashing.php`
@@ -256,8 +259,9 @@ vendor/bin/pint --test  # style
 ```
 
 `tests/TestCase.php` applies `DatabaseTransactions`, so each test rolls back. **Never use
-`RefreshDatabase` in this project** — the suite runs against the same Neon database as the app and
-that database holds djbb-lite's tables, so migrating or wiping would destroy real data. The
+`RefreshDatabase` in this project** — the suite runs against the same Neon database as the live
+board, so migrating or wiping would destroy real data. The two `ImportDjangoDataTest` cases skip
+themselves when `auth_user` is absent, which is the state of the current database. The
 `phpunit.xml` env block keeps sessions, cache and mail in-memory; the database connection still
 comes from `.env`.
 

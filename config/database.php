@@ -33,9 +33,9 @@ return [
             // the first statement reports success and the next one fails with
             // "current transaction is aborted". Emulating prepares client-side sends plain SQL.
             'options' => [PDO::ATTR_EMULATE_PREPARES => true],
-            // djbb-lite still lives in this database. migrate:fresh resolves its table list
-            // against search_path, which defaults to public, so name the Django tables here
-            // rather than rely on nobody typing the wrong command.
+            // Where djbb-lite shares a database, its tables sit alongside these. migrate:fresh
+            // resolves its table list against search_path, which defaults to public, so name the
+            // Django tables here rather than rely on nobody typing the wrong command.
             'dont_drop' => [
                 'auth_group',
                 'auth_group_permissions',
