@@ -11,11 +11,61 @@ First release: the whole application is a port of `djbb-lite` (Django 6.1) to La
 
 ### Added
 
+- **Board counts in the footer** — the same bordered panel `djbb-lite` puts above the credit line on
+  every page, with this board's numbers in it: `5 users · 4 comments · 3 topics`. A topic is a post
+  here too, so the trio is members,
+  replies and topics, counted per request rather than cached. Django's context processor becomes
+  `app/View/Composers/BoardCounts.php`, bound to `layouts.app` with `View::composer()` in
+  `AppServiceProvider::boot()`: Blade renders `@extends` through the view factory, so one binding
+  reaches every page the board answers with — the login and signup pages included — and a view added
+  later needs no line of its own. `partials/stats.blade.php` prints the numbers, using
+  `Str::plural($word, $count)` where Django had `|pluralize`.
+- **A page per member** — `/user/{username}` shows one writer's avatar at its full 100×100 beside
+  their name, and every avatar on the board (post author and comment author, on the index and on a
+  thread) now links to it. The e-mail line renders only when
+  `$request->user()?->is_staff`, so guests and fellow writers see a face and a name.
+  `UserController::show` reads `User::where('username', …)->firstOrFail()`, which is
+  `get_object_or_404` again: an unknown name answers the framework's 404, not a board page.
+- **A 404 that speaks board** — `/post/{id}` with nothing behind it renders
+  `resources/views/posts/missing.blade.php` ("That topic does not exist, or it has been deleted")
+  with a two-second `<meta http-equiv="refresh">` back to the index and a link for anyone who wants it
+  sooner, while the response still carries status 404. `PostController::show` therefore drops implicit
+  model binding and returns `response()->view(…, 404)` — the signature widened to `View|Response`.
+  Django raised `Http404` and pointed `handler404` at this page; returning it instead is what keeps
+  `APP_DEBUG=true` from answering a stack trace on the machine most likely to be running this repo.
+  `find((int) $post)` keeps Django's `<int:pk>` behaviour too: an over-long digit string saturates to
+  `PHP_INT_MAX`, so a 20-digit id is a missing post rather than a Postgres out-of-range error.
+- **Read-only profiles in `/admin`** — `/admin/users` lists every writer's avatar, name and e-mail,
+  behind the same `staff` middleware as the rest of `/admin`. Django needed
+  `ProfileAdmin` to refuse add, change and delete to force its change page into view mode, and had to
+  declare every field in `readonly_fields` for a method column to appear at all; this admin was
+  hand-rolled, so the page is a plain table with no form, no buttons and nothing to disable. There is
+  no search box either — Django's `search_fields` covered two text fields, and this instance has five
+  accounts to search. Accounts are edited nowhere in this app: the seeder and
+  `board:import-django` make them, `/profile` changes an avatar and a password.
+- **Change password on `/profile`** — `PasswordRequest` checks `old_password` against the stored hash
+  with `Hash::check` and runs Django's other validators over the new one: 8 characters minimum, not
+  entirely numeric, not too similar to this account's username or address. The last of those is
+  `app/Validation/PasswordSimilarity.php`, a faithful re-use of
+  `UserAttributeSimilarityValidator`'s arithmetic — word-split pieces plus the whole value, skipped
+  when the password dwarfs them, rejected at a 0.7 common-character frequency ratio. The result
+  flashes through `session('status')`, which `layouts/app.blade.php` now renders.
+  Two shapes differ from Django on purpose. The form posts to its own route
+  (`POST /profile/password`) instead of sharing `/profile` and letting the pressed button decide which
+  of two bound forms to validate; and nothing has to keep the session alive, because Laravel's session
+  holds the user's id where Django keyed the cookie to the password hash and needed
+  `update_session_auth_hash` to survive a self-change. The new password is written through the
+  `hashed` cast, so it lands as bcrypt and finishes what the first login of an imported pbkdf2 hash
+  started. `CommonPasswordValidator` is the one Django check with no counterpart here: Laravel ships no
+  blocklist to consult, and a copy of Django's twenty thousand words is not a thing this board should
+  grow.
+
 - **Laravel 13 port of the board** — `Post` / `Comment` / `User` models, `PostController`,
-  `AuthController`, `AdminController`, three `FormRequest` classes mirroring Django's forms, and
+  `AuthController`, `AdminController`, `FormRequest` classes mirroring Django's forms, and
   Blade views that reuse the
   Django templates' markup, inline CSS and wording. URLs, route names, validation messages and
-  redirects match `djbb-lite` (19 routes).
+  redirects match `djbb-lite` (24 routes), except four that Django has no page for: `/profile` and
+  its POST, `POST /profile/password`, and `GET /admin/users`.
 - **Ownership behaves like Django** — `Post::canBeManagedBy()` gates edit/delete, and failing it
   redirects to the post instead of answering 403. `/admin` still 403s non-staff through the
   `staff` middleware alias in `bootstrap/app.php`.
@@ -40,8 +90,10 @@ First release: the whole application is a port of `djbb-lite` (Django 6.1) to La
   by `partials/avatar-picker.blade.php`; avatars render in the header, on the index, under every
   comment and in the three admin tables. Uploaded files live in the docroot, so there is no
   `storage:link` step.
-- **Feature tests** — 51 tests over posts, comments, permissions, auth, hashing, admin, avatars and
-  the importer, run against the live Neon database inside a transaction per test.
+- **Feature tests** — 84 tests over posts, comments, permissions, auth, hashing, admin, avatars, the
+  importer, the member page, the footer counts, the missing-post page and password changes, run
+  against the live Neon database inside a transaction per test. The two importer cases skip
+  themselves while `auth_user` is absent from the connected database.
 
 ### Changed
 
@@ -77,6 +129,19 @@ First release: the whole application is a port of `djbb-lite` (Django 6.1) to La
   Django side is untouched.
 - `timestamp()` columns are second precision, so imported `created_at` values may round by up to
   one second relative to Django's `timestamptz(6)`.
+- The five features above are a port of djbb-lite's later commits, and one of that app's changelog
+  entries was deliberately left behind: its `Deploying to Neon` walkthrough describes `neon.ts` and
+  `neon deploy` applying that policy file to a branch. This repo has no `neon.ts` and no Node
+  tooling to build one with, so the closest thing it needs — pulling the pooled endpoint out of the
+  console — is already in "Setting up a database".
+- A class-based `View::composer()` is invoked as `compose()` in Laravel 13, not `handle()`:
+  `ManagesEvents::classEventMethodForPrefix()` maps `composing*` to `compose`. Naming it `handle`
+  fails every page in the layout with `Call to undefined method` — which is how the footer composer
+  was found, since it fires on the index.
+- The ported pages were verified three ways: `php artisan test`, HTTP walkthroughs on
+  `0.0.0.0:7112` with a cookie jar per identity (guest, `user`, `admin`), and headless-Chrome
+  screenshots of the footer panel, a member page as both a guest and a staff visitor, `/profile`
+  with the picker and the password form, the missing-post page, and `/admin/users`.
 - Verified against Neon Postgres 18.6 on the pooled endpoint with the same `DATABASE_URL` and
   `APP_KEY`/`SECRET_KEY` the Django app uses: `migrate`, `board:import-django` (4 users, 3 posts,
   3 comments), a full HTTP walkthrough of every route (including pbkdf2 login and its bcrypt

@@ -14,6 +14,7 @@
     .post h2, .comment h3 { margin: 0 0 .35rem; font-size: 1.05rem; }
     .meta { font-size: .8rem; opacity: .7; margin-bottom: .5rem; }
     .avatar { width: 1.5rem; height: 1.5rem; border-radius: 50%; vertical-align: -.35rem; margin-right: .3rem; }
+    .avatar-full { border-radius: 50%; }
     .avatar-picker { border: 0; padding: 0; margin: .35rem 0 .75rem; }
     .avatars { display: flex; flex-wrap: wrap; gap: .75rem; margin: .35rem 0 .75rem; }
     .avatars label { display: flex; flex-direction: column; align-items: center; gap: .2rem; font-size: .75rem; cursor: pointer; }
@@ -22,10 +23,13 @@
     .field { display: block; width: 100%; box-sizing: border-box; font: inherit; padding: .5rem; margin: .35rem 0 .75rem; }
     .actions { display: flex; gap: .75rem; align-items: center; margin-top: .5rem; }
     .errorlist { color: #c00; margin: 0 0 .5rem; }
+    .messages { border: 1px solid rgba(128,128,128,.4); border-radius: .5rem; padding: .5rem .75rem; font-size: .9rem; margin: 0 0 1rem; }
     table { border-collapse: collapse; width: 100%; }
     th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid rgba(128,128,128,.4); font-size: .9rem; }
     footer { margin-top: 2.5rem; padding-top: .75rem; border-top: 1px solid rgba(128,128,128,.4); font-size: .8rem; opacity: .7; text-align: center; }
+    .stats { width: fit-content; margin: 0 auto .75rem; border: 1px solid rgba(128,128,128,.4); border-radius: .5rem; padding: .4rem .75rem; font-size: .85rem; }
   </style>
+  @yield('head')
 </head>
 <body>
   <header>
@@ -46,8 +50,15 @@
     @endauth
   </header>
 
+  @if (session('status'))
+    <p class="messages">{{ session('status') }}</p>
+  @endif
+
   @yield('content')
 
-  <footer>Designed and developed by <a href="https://github.com/IvanDeus" target="_blank">Ivan Deus</a></footer>
+  <footer>
+    @include('partials.stats')
+    Designed and developed by <a href="https://github.com/IvanDeus" target="_blank">Ivan Deus</a>
+  </footer>
 </body>
 </html>

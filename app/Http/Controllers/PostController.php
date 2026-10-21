@@ -7,6 +7,7 @@ use App\Http\Requests\PostRequest;
 use App\Models\Comment;
 use App\Models\Post;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 
@@ -19,13 +20,25 @@ class PostController extends Controller
         ]);
     }
 
-    public function show(Request $request, Post $post): View
+    /**
+     * `{post}` arrives as a string rather than a bound model: a number with no post behind it is
+     * this page's own subject, and implicit binding would throw before it could be answered. The
+     * cast keeps an id past bigint range a missing post too — PHP saturates it to the largest value
+     * the column holds, so the lookup misses instead of the driver raising.
+     */
+    public function show(Request $request, string $post): View|Response
     {
-        $post->load(['author', 'comments.author']);
+        $found = Post::find((int) $post);
+
+        if ($found === null) {
+            return response()->view('posts.missing', [], 404);
+        }
+
+        $found->load(['author', 'comments.author']);
 
         return view('posts.show', [
-            'post' => $post,
-            'canManage' => $post->canBeManagedBy($request->user()),
+            'post' => $found,
+            'canManage' => $found->canBeManagedBy($request->user()),
         ]);
     }
 

@@ -1,6 +1,6 @@
 # lvbb-lite
 
-A Laravel 13 port of `../djbb-lite` (Django). Small bulletin board: three models, four
+A Laravel 13 port of `../djbb-lite` (Django). Small bulletin board: three models, five
 controllers, Blade views with inline CSS. No starter kit, no Node build step, no Tailwind.
 
 ## Non-negotiables
@@ -14,6 +14,10 @@ controllers, Blade views with inline CSS. No starter kit, no Node build step, no
   `dont_drop` as a backstop for any database where they do coexist.
 - **Tests roll back, they do not migrate.** `tests/TestCase.php` uses `DatabaseTransactions`.
   Do not switch it to `RefreshDatabase`.
+- **Feature tests must survive a populated database.** They run against the live board, so never assert
+  an absolute count, a "nothing here yet" message, or a URL with a host in it — a test request's host
+  is `http://localhost` while the running server's is not. Assert the *change* a request made, render
+  a partial directly to check its wording, and build HTML needles from `route(...)`.
 - **Keep `PDO::ATTR_EMULATE_PREPARES => true`** in the pgsql connection. Neon's pooled endpoint is
   PgBouncer in transaction mode; with native prepared statements the second statement inside a
   transaction fails with `SQLSTATE[25P02]` and migrations break.
@@ -26,6 +30,11 @@ controllers, Blade views with inline CSS. No starter kit, no Node build step, no
   traversal path, or another user's file. Every insert needs the column (factory, seeder, importer).
 - **Avatar tests must `Storage::fake('avatars')`.** That disk is rooted at `public/avatars`, the
   docroot, so a test that skips the fake writes real files into the served folder.
+- **The footer counts come from the layout composer.** `View::composer('layouts.app', BoardCounts::class)`
+  in `AppServiceProvider::boot()` is what puts the `users · comments · topics` panel above the credit
+  line on every page; a new view extends the layout and gets it for free. Do not pass the numbers from
+  controllers, and do not cache them. A class-based composer is called as **`compose()`**, not
+  `handle()` — get that wrong and every page in the layout 500s.
 
 ## Layout that differs from a stock skeleton
 
@@ -43,6 +52,14 @@ controllers, Blade views with inline CSS. No starter kit, no Node build step, no
 - `app/Services/AvatarStore.php` — writes through `Storage::disk('avatars')` (`config/filesystems.php`,
   rooted at `public/avatars`, no `storage:link`) and removes the file the row stopped pointing at.
   Handles must stay disk-relative: Flysystem prefixes an absolute path onto the disk root.
+- `app/Validation/PasswordSimilarity.php` — Django's `UserAttributeSimilarityValidator`, arithmetic and
+  all: each of `username` and `email` split on non-word characters plus the whole value, a piece the
+  password dwarfs ignored, the rest rejected at a common-character frequency of 0.7 or more. Do not
+  simplify it to `str_contains` — that rejects passwords Django accepts.
+- `app/Http/Requests/PasswordRequest.php` — three of Django's four password validators, the messages
+  verbatim. `CommonPasswordValidator` is deliberately unported (no blocklist in Laravel, none to add);
+  `min:8`, `ctype_digit` and the similarity check are what the form enforces and the page hint says no
+  more than that.
 - `resources/views/` renders the same URLs and wording as the Django templates. Keep error strings
   verbatim ("This username is already taken.", "Wrong username or password.").
 
@@ -53,8 +70,22 @@ controllers, Blade views with inline CSS. No starter kit, no Node build step, no
 - Login lookup is case-sensitive, signup username check is case-insensitive, e-mails are not
   unique — all three match Django.
 - Route paths and names mirror `../djbb-lite/config/urls.py`; `/post/new` is declared before
-  `/post/{post}`, and comments POST to the post's own URL. `/profile` is the one pair of routes with
-  no Django counterpart.
+  `/post/{post}`, and comments POST to the post's own URL. Three paths have no Django counterpart:
+  `/profile` and its POST, `POST /profile/password` (Django posts both profile forms to one URL and
+  reads the pressed button; separate routes do the same job without that step), and `GET /admin/users`
+  (Django's contrib admin generates it). `/user/{username}` matches Django again.
+- `PostController::show` **returns** `posts/missing` with status 404 instead of `findOrFail`.
+  `APP_DEBUG=true` makes Laravel answer a `NotFoundHttpException` with its own technical page, which is
+  the page the board is trying not to show, and a 200 would be a lie to `curl`. Keep the `(int)` cast:
+  it saturates a 20-digit id at `PHP_INT_MAX`, so oversized ids stay missing posts rather than
+  Postgres out-of-range errors. `/user/{username}` is the opposite case on purpose — `firstOrFail()`,
+  because there is no missing-member template.
+- The e-mail line on a member page renders from `$request->user()?->is_staff` and nothing else. Avatars
+  link there from the index and from a thread; that is the only place a board reader can reach a
+  profile that is not their own.
+- A password change writes through `forceFill` so the `hashed` cast runs and the result is bcrypt, and
+  needs no `update_session_auth_hash` equivalent: Laravel's session holds the user's id, not a digest
+  of the hash. Do not add one, and do not merge the two `/profile` POSTs.
 - An avatar is mandatory but never forced twice: signup requires a preset pick, `/profile` accepts an
   empty submission and keeps whatever is stored, because the whitelist only names presets and an
   uploaded avatar would otherwise be impossible to keep.
@@ -65,8 +96,8 @@ controllers, Blade views with inline CSS. No starter kit, no Node build step, no
 ## Commands
 
 ```bash
-php artisan serve --host=127.0.0.1 --port=7112   # dev server
-php artisan test                                 # feature tests against Neon
+php artisan serve --host=127.0.0.1 --port=7112   # dev server (0.0.0.0 to answer on every interface)
+php artisan test                                 # 84 feature tests against Neon
 vendor/bin/pint                                  # fix style (pint --test to check)
 php artisan migrate                              # apply Laravel migrations
 ```

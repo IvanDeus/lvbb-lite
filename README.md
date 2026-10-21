@@ -16,10 +16,20 @@ exactly as it was in `base.html`.
 - **Author-only editing** — you can edit or delete your own posts.
 - **Staff override** — staff users can edit or delete *anyone's* post.
 - **`/admin`** — a hand-rolled list of posts and comments with delete buttons, staff only.
+- **Read-only profiles in the admin** — `/admin/users` lists every writer's avatar, name and e-mail.
+  The list is a table with no form, no button and no link in it.
 - **Anonymous read access** — browsing needs no account; writing does.
 - **Self-registration** — username, e-mail, password (min 6 chars), auto-login afterwards.
 - **Avatars** — mandatory for every user: one of the four presets in `public/avatars`, or your own
   JPG/PNG/WebP, centre-cropped to 100&times;100 by GD as it is saved. `/profile` changes it later.
+- **Change password** — `/profile` takes a new password too, against the current one, and leaves you
+  signed in through your own change.
+- **A 404 that knows where it is** — a post id with nothing behind it renders the board's own page
+  and carries the visitor back to the index two seconds later, with status 404 intact.
+- **A page per member** — every avatar on the board links to `/user/{name}`, which shows the picture
+  at its full 100&times;100. The e-mail address there is visible to staff only.
+- **Footer counts** — a small panel above the credit line on every page, holding three numbers:
+  members, replies, and topics. A topic is a post here.
 
 ## Requirements
 
@@ -114,14 +124,16 @@ php artisan migrate
 php artisan serve --host=127.0.0.1 --port=7112
 ```
 
-Open <http://127.0.0.1:7112/>.
+Open <http://127.0.0.1:7112/>. Use `--host=0.0.0.0` to answer on every interface instead — which is
+how the instance this port was verified against runs — and remember that binds the seeded accounts to
+whatever network the host is on.
 
 ## Test accounts
 
-| Username | Password  | Type    | Can                                               |
-| -------- | --------- | ------- | ------------------------------------------------- |
-| `admin`  | `pass123` | staff   | Everything, plus `/admin` and other users' posts  |
-| `user`   | `zxc123`  | regular | Own posts only, no `/admin`                       |
+| Username | Password  | Type    | Can                                                        |
+| -------- | --------- | ------- | ---------------------------------------------------------- |
+| `admin`  | `pass123` | staff   | Everything, `/admin` including `/admin/users`, e-mails on member pages |
+| `user`   | `zxc123`  | regular | Own posts only, no `/admin`, no e-mails on member pages     |
 
 These are seeded for manual testing only (`php artisan db:seed`, which skips accounts that
 already exist). They are weak by design — do not run this instance somewhere reachable from the
@@ -130,13 +142,15 @@ internet.
 ## Routes
 
 Paths and route names match djbb-lite; the POST twin of a GET route gets a `_store` suffix.
-`/profile` is the only pair with no Django equivalent — the port needed somewhere to change an
-avatar, and the board has no other page for a user's own data.
+Three paths have no Django equivalent, all because of how Laravel asks for the same behaviour:
+`/profile` and its POST (the board had no page for a user's own data), `POST /profile/password`
+(Django posts both profile forms to one URL and lets the button decide), and `/admin/users` (Django's
+contrib admin generates that page, this one is written).
 
 | Method     | Path                        | Name                  | Controller action     | Notes                    |
 | ---------- | --------------------------- | --------------------- | --------------------- | ------------------------ |
 | `GET`      | `/`                         | `post_list`           | `PostController@index` | public                   |
-| `GET`      | `/post/{post}`              | `post_detail`         | `@show`                | public                 |
+| `GET`      | `/post/{post}`              | `post_detail`         | `@show`                | public, own 404 page     |
 | `POST`     | `/post/{post}`              | `comment_store`       | `@storeComment`        | login required           |
 | `GET`      | `/post/new`                 | `post_create`         | `@create`              | login required           |
 | `POST`     | `/post/new`                 | `post_store`          | `@store`               | login required           |
@@ -144,6 +158,7 @@ avatar, and the board has no other page for a user's own data.
 | `POST`     | `/post/{post}/edit`         | `post_update_store`   | `@update`              | author or staff          |
 | `GET`      | `/post/{post}/delete`       | `post_delete`         | `@confirmDelete`       | author or staff          |
 | `POST`     | `/post/{post}/delete`       | `post_delete_store`   | `@destroy`             | author or staff          |
+| `GET`      | `/user/{username}`          | `user_detail`         | `UserController@show` | public, e-mail staff-only |
 | `GET`      | `/login`                    | `login`               | `AuthController@showLogin` |                        |
 | `POST`     | `/login`                    | `login_store`         | `@login`               |                          |
 | `GET`      | `/signup`                   | `signup`              | `@showSignup`          |                          |
@@ -151,8 +166,10 @@ avatar, and the board has no other page for a user's own data.
 | `POST`     | `/logout`                   | `logout`              | `@logout`              | POST only, as in Django  |
 | `GET`      | `/profile`                  | `profile`             | `ProfileController@show` | login required         |
 | `POST`     | `/profile`                  | `profile_store`       | `@update`              | login required           |
+| `POST`     | `/profile/password`         | `password_store`      | `@updatePassword`      | login required           |
 | `GET`      | `/admin`                    | `admin_posts`         | `AdminController@posts` | staff                  |
 | `GET`      | `/admin/comments`           | `admin_comments`      | `@comments`            | staff                    |
+| `GET`      | `/admin/users`              | `admin_users`         | `@users`               | staff, read-only         |
 | `GET`      | `/admin/post/{post}`        | `admin_post`          | `@post`                | staff                    |
 | `POST`     | `/admin/post/{post}/delete` | `admin_post_delete`   | `@destroyPost`         | staff                    |
 | `POST`     | `/admin/comment/{c}/delete` | `admin_comment_delete` | `@destroyComment`     | staff                    |
@@ -183,6 +200,108 @@ Django's `post_detail` accepted comment POSTs from anonymous visitors and relied
 to hide the form; here `comment_store` sits behind the `auth` middleware, which is the same
 outcome without the trap.
 
+## The pages that came last
+
+### A page for each member
+
+`/user/{username}` shows one writer's avatar at the 100&times;100 it was made for, beside their name.
+Every avatar on the board — post author and comment author, on the index and on a thread — is wrapped
+in a link to that page, which is why the view needs no query beyond the lookup itself:
+`User::where('username', $username)->firstOrFail()`. The e-mail line renders only when
+`$request->user()?->is_staff`, so a guest and a fellow writer see exactly what Django's
+`user_detail.html` shows them: a face and a name.
+
+Django's `<str:username>` needed no constraint and neither does `{username}` — the segment takes
+anything but a slash, and the check is a lookup rather than a route pattern. An unknown name answers
+the framework's 404; the board has no missing-member page, only a missing-*post* one.
+
+### Looking at profiles in the admin
+
+`/admin/users` is a read-only window onto the board's people: avatar, name, e-mail, in username
+order, behind the same `staff` middleware as the rest of `/admin` — a guest goes to `/login`, a writer
+gets `403`.
+
+`admin/users.blade.php` is a `<table>` with no form, no button and no anchor in it, so there is
+nothing to disable. Django had to work for the same result: `ProfileAdmin` refusing add, change and
+delete is what puts its change page into view mode, and every field then has to be listed in
+`readonly_fields` to appear at all, because the model only holds the avatar string while name and
+e-mail are methods reading through the one-to-one — with a `select_related` so the list does not fetch
+each user separately. Here avatar, name, e-mail and the staff flag all live on the `users` row, so one
+query reads the page and there is no relation to follow.
+
+What was not copied over is the search box: Django's `search_fields` covered two text fields, and this
+instance has five accounts. Accounts are edited nowhere in this app — the seeder and
+`board:import-django` make them, `/profile` changes an avatar and a password, and Django keeps its own
+user admin because it has one.
+
+### Changing a password
+
+`/profile` holds two forms. Django posts both to one URL and reads the pressed button's name
+(`change_password`) to decide which of the two is bound; here each has its own endpoint —
+`POST /profile` for the avatar, `POST /profile/password` for the password — so a view never asks which
+button was pressed, a rejected password cannot paint errors over the picker next to it, and saving an
+avatar never has to know the current password.
+
+`PasswordRequest` is the counterpart of `PasswordChangeForm`: `Hash::check` against the stored hash
+for `old_password`, `min:8` and `same:new_password1` for the pair, then an `after()` hook for the two
+checks Laravel has no rule for — all-numeric, and too similar to this account's own username or
+address. The messages are Django's own strings, including the typographic apostrophe.
+
+The similarity check had to be written (`app/Validation/PasswordSimilarity.php`) because nothing in
+Laravel resembles `UserAttributeSimilarityValidator`: each attribute is split on non-word characters
+plus the whole value, a piece the password dwarfs is skipped (ten times its length, and under 35% of
+the password), and what is left is rejected at a common-character frequency of 0.7 or more.
+
+`CommonPasswordValidator` is the one Django check with no counterpart — Laravel ships no blocklist to
+consult, and copying Django's twenty thousand words into a toy board is a thing this repo should not
+grow. A password drawn from that list therefore passes here, which is why the field hint promises only
+what is enforced.
+
+Two details of the write. `forceFill` is used so the `hashed` cast runs, which means the new password
+lands as bcrypt and finishes what the first login of an imported pbkdf2 string started. And nothing
+resembles `update_session_auth_hash`: Laravel's session row is keyed to the user's **id**, so a new
+hash does not invalidate the cookie that just arrived, whereas Django keys it to the password hash and
+would log out anyone who changed their own password without that call. The result is announced through
+`session('status')` — the flashed line `layouts/app.blade.php` renders as `.messages`, which is what
+`django.contrib.messages` became here.
+
+### When a post is gone
+
+`/post/7` with nothing behind it answers with `resources/views/posts/missing.blade.php` — "That topic
+does not exist, or it has been deleted" — and a `<meta http-equiv="refresh" content="2;url=…">` in the
+head carries the visitor to the index two seconds later, with a plain link for anyone who wants it
+sooner. `@section('head')` is a `@yield` the layout gained for exactly this, placed after the inline
+`<style>`.
+
+Two choices are worth knowing about. The controller **returns** that page with
+`response()->view('posts.missing', [], 404)` rather than throwing `NotFoundHttpException`, because with
+`APP_DEBUG=true` Laravel renders its own technical page over the exception handler on exactly the
+machine most likely to be running this repo — the same reason Django's `post_detail` returns instead of
+raising `Http404`. And the response still **carries status 404**: the redirect is a courtesy to the
+person reading the page, not a lie to the crawler, the monitoring check, or `curl`.
+
+Django got "a pk is an integer or nothing" free from `<int:pk>`. Here `show()` takes a string and calls
+`Post::find((int) $post)`, and PHP saturates an over-long digit string at `PHP_INT_MAX` — so
+`/post/99999999999999999999` is a missing post rather than a Postgres integer-out-of-range 500. That
+cast plus `whereNumber` is what keeps Django's matcher.
+
+### The three footer numbers
+
+Every page closes with a small bordered panel above the credit line: `5 users · 4 comments ·
+3 topics`. **A topic is a post** — this board has no separate thread or category model — so the
+three figures are members, replies, and topics.
+
+`app/View/Composers/BoardCounts.php` supplies them, bound to `layouts.app` with `View::composer()` in
+`AppServiceProvider::boot()`. That is how every board view and the login and signup pages get the same
+footer without each of them passing three counts, and without the next view added forgetting to: Blade
+compiles `@extends` into a `make()` on the layout, so a composer on the layout fires for everything
+that extends it. The one trap is that a class-based composer is invoked as `compose()`, not `handle()`
+— name it `handle` and every page in the layout 500s.
+
+`partials/stats.blade.php` does the wording, with `Str::plural($word, $count)` where Django's template
+had `|pluralize`. They are counted on every request rather than cached: three indexed `COUNT`s over
+tables this small are cheaper than a cache that can report a member who has since left.
+
 ## Living with the Django app
 
 The port was written to share one schema with djbb-lite, each app with its own tables. The database
@@ -211,6 +330,11 @@ importer stands down until it is pointed at a database where the Django tables l
 - **`users.avatar` is Laravel-only.** `auth_user` has no avatar field, so `board:import-django`
   derives one from the primary key (`User::presetForId()`, the same `id % 4` rotation the migration
   used). Django keeps reading `auth_user` untouched; the two apps never write the same column.
+- **Member pages therefore show different pictures.** Django's `/user/<name>/` reads the avatar from
+  `board.Profile`, this app's `/user/{username}` from `users.avatar`. A Django user who uploaded a
+  picture sees it there and the preset derived from their id here — `board:import-django` skips ids
+  that already exist, so it never carries an upload across. Username and e-mail agree, since both come
+  from the same rows.
 
 ## Project layout
 
@@ -221,12 +345,15 @@ importer stands down until it is pointed at a database where the Django tables l
 │   ├── Database/Connectors/PostgresConnector.php  # channel_binding into the DSN
 │   ├── Hashing/DjangoHasher.php                # pbkdf2_sha256/sha1 + bcrypt upgrade
 │   ├── Http/
-│   │   ├── Controllers/      # PostController, AuthController, AdminController, ProfileController
+│   │   ├── Controllers/      # PostController, AuthController, AdminController,
+│   │   │                     # ProfileController, UserController
 │   │   ├── Middleware/       # EnsureUserIsStaff (alias: staff)
-│   │   └── Requests/         # PostRequest, CommentRequest, RegisterRequest, ProfileRequest
-│   │                         # and Concerns/GathersAvatar, the shared avatar rules
+│   │   └── Requests/         # PostRequest, CommentRequest, RegisterRequest, ProfileRequest,
+│   │                         # PasswordRequest, and Concerns/GathersAvatar, the shared avatar rules
 │   ├── Models/               # Post, Comment, User
-│   └── Services/             # AvatarResizer (GD crop + resample), AvatarStore (write + cleanup)
+│   ├── Services/             # AvatarResizer (GD crop + resample), AvatarStore (write + cleanup)
+│   ├── Validation/PasswordSimilarity.php  # Django's UserAttributeSimilarityValidator
+│   └── View/Composers/BoardCounts.php     # the three footer numbers, on every page
 ├── bootstrap/app.php         # routing, staff alias, JSON exception rules
 ├── config/
 │   ├── database.php          # pgsql only, url parsing, dont_drop, emulated prepares
@@ -238,14 +365,16 @@ importer stands down until it is pointed at a database where the Django tables l
 │   └── seeders/              # admin + user test accounts
 ├── public/avatars/           # four 100x100 presets, plus uploads/ (gitignored)
 ├── resources/views/
-│   ├── layouts/app.blade.php # header, nav, inline CSS
-│   ├── posts/                # index, show, form, confirm_delete
+│   ├── layouts/app.blade.php # header, nav, inline CSS, flashes, footer
+│   ├── posts/                # index, show, form, confirm_delete, missing
+│   ├── users/show.blade.php  # one member, avatar at full size
 │   ├── auth/                 # login, signup
-│   ├── admin/                # posts, post, comments
-│   ├── partials/             # avatar-picker, shared by signup and profile
-│   └── profile.blade.php
+│   ├── admin/                # posts, post, comments, users (read-only)
+│   ├── partials/             # avatar-picker (signup + profile), stats (footer)
+│   └── profile.blade.php     # avatar picker and password form, posting separately
 ├── routes/web.php
-└── tests/Feature/            # posts, auth, admin, hashing, import, avatars
+└── tests/Feature/            # posts, auth, admin, hashing, import, avatars, member page,
+                              # footer counts, missing post, password change
 ```
 
 `Post` and `Comment` set `const UPDATED_AT = null` (Django had only `created_at`), `comments()`
@@ -254,7 +383,7 @@ orders by `created_at`, and `password` / `remember_token` stay hidden on the `Us
 ## Tests
 
 ```bash
-php artisan test        # 51 feature tests
+php artisan test        # 84 feature tests, 2 of which skip without the Django tables
 vendor/bin/pint --test  # style
 ```
 
@@ -268,7 +397,8 @@ comes from `.env`.
 ## Production notes
 
 Nothing here is production-shaped, on purpose: `APP_DEBUG=true`, the `log` mailer, seeded weak
-accounts, and `artisan serve` bound to loopback. The two things that would actually bite:
+accounts, and `artisan serve` — a development server, which here listens on `0.0.0.0:7112` so another
+machine can look at the board. The things that would actually bite:
 
 - Set `APP_KEY` freshly (`php artisan key:generate`); the key that shipped in djbb-lite's repo is
   public and is reused here only because this is the same toy instance.
@@ -285,6 +415,11 @@ accounts, and `artisan serve` bound to loopback. The two things that would actua
 - Pagination, edit history, nested replies, markdown, attachments. The avatar upload is the one file
   the board accepts, and it is resized to 100x100 rather than stored as sent.
 - Password reset / e-mail verification (djbb-lite never had them either).
+- Django's common-password blocklist. `CommonPasswordValidator` consults a file of about twenty
+  thousand leaked passwords; `PasswordRequest` checks length, all-digits and similarity to the
+  account's own username or address, and nothing else. It is the only one of Django's four validators
+  with no counterpart here.
+- A search box on `/admin/users`. Django had one over two text fields; this instance has five accounts.
 - Rate limiting or any spam control on comments.
 - Front-end build tooling — `package.json` and Vite are gone; there is nothing to compile.
 

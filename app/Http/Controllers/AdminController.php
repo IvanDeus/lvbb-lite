@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Comment;
 use App\Models\Post;
+use App\Models\User;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 
@@ -14,6 +15,15 @@ class AdminController extends Controller
         return view('admin.posts', [
             'posts' => Post::with('author')->withCount('comments')->latest('created_at')->get(),
         ]);
+    }
+
+    /**
+     * The board's people, for looking at and not for touching. There is no add, edit or delete
+     * route here to withhold: this table is the whole of what the admin offers a user row.
+     */
+    public function users(): View
+    {
+        return view('admin.users', ['users' => User::orderBy('username')->get()]);
     }
 
     public function post(Post $post): View

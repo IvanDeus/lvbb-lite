@@ -4,7 +4,7 @@
 
 @section('content')
   <h2>Posts</h2>
-  <p><a href="{{ route('admin_comments') }}">Comments</a></p>
+  <p><a href="{{ route('admin_comments') }}">Comments</a> &middot; <a href="{{ route('admin_users') }}">Users</a></p>
 
   <table>
     <tr><th>Title</th><th>Author</th><th>Created</th><th></th></tr>
