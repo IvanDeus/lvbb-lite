@@ -3,6 +3,7 @@
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\PostController;
+use App\Http\Controllers\ProfileController;
 use Illuminate\Support\Facades\Route;
 
 // Route names follow djbb-lite's view names; the POST twin of a GET route gets a _store suffix.
@@ -16,6 +17,10 @@ Route::middleware('auth')->group(function () {
     Route::post('/post/new', [PostController::class, 'store'])->name('post_store');
 
     Route::post('/post/{post}', [PostController::class, 'storeComment'])->whereNumber('post')->name('comment_store');
+
+    // Not in djbb-lite's urls.py: the board has no other place to change a user's own data.
+    Route::get('/profile', [ProfileController::class, 'show'])->name('profile');
+    Route::post('/profile', [ProfileController::class, 'update'])->name('profile_store');
 
     Route::get('/post/{post}/edit', [PostController::class, 'edit'])->whereNumber('post')->name('post_update');
     Route::post('/post/{post}/edit', [PostController::class, 'update'])->whereNumber('post')->name('post_update_store');

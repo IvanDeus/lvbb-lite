@@ -2,12 +2,15 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\GathersAvatar;
 use App\Models\User;
 use Closure;
 use Illuminate\Foundation\Http\FormRequest;
 
 class RegisterRequest extends FormRequest
 {
+    use GathersAvatar;
+
     public function authorize(): bool
     {
         return true;
@@ -31,6 +34,7 @@ class RegisterRequest extends FormRequest
             // Django never enforced unique e-mails, so neither does this form.
             'email' => ['required', 'email', 'max:255'],
             'password' => ['required', 'min:6'],
+            ...$this->avatarRules(),
         ];
     }
 }

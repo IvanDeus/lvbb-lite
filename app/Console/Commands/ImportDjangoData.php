@@ -2,6 +2,8 @@
 
 namespace App\Console\Commands;
 
+use App\Models\User;
+use Closure;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -41,8 +43,14 @@ class ImportDjangoData extends Command
             return self::FAILURE;
         }
 
+        // Django has no avatar column and users.avatar is NOT NULL, so imported rows get the same
+        // id-derived preset the migration handed the rows that were already here.
+        $computed = [
+            'users' => ['avatar' => fn (object $row): string => User::presetForId((int) $row->id)],
+        ];
+
         foreach (self::MAPS as $destination => $source) {
-            $count = $this->copyRows($source['table'], $destination, $source['columns']);
+            $count = $this->copyRows($source['table'], $destination, $source['columns'], $computed[$destination] ?? []);
             $this->syncSequence($destination);
             $this->components->info(str_pad($destination.':', 12)." {$count} rows copied");
         }
@@ -56,8 +64,9 @@ class ImportDjangoData extends Command
      * Rows already present are skipped, so re-running never clobbers edits made in Laravel.
      *
      * @param  array<int, string>|array<string, string>  $columns  list, or source => destination
+     * @param  array<string, Closure>  $computed  destination column => value built from the source row
      */
-    private function copyRows(string $from, string $to, array $columns): int
+    private function copyRows(string $from, string $to, array $columns, array $computed = []): int
     {
         $names = [];
 
@@ -72,10 +81,18 @@ class ImportDjangoData extends Command
             ->orderBy('id')
             ->get()
             ->reject(fn (object $row) => in_array((int) $row->id, $existing, true))
-            ->map(fn (object $row) => array_combine(
-                array_values($names),
-                array_map(fn ($source) => $row->{$source} ?? null, array_keys($names))
-            ))
+            ->map(function (object $row) use ($names, $computed): array {
+                $attributes = array_combine(
+                    array_values($names),
+                    array_map(fn ($source) => $row->{$source} ?? null, array_keys($names))
+                );
+
+                foreach ($computed as $destination => $value) {
+                    $attributes[$destination] = $value($row);
+                }
+
+                return $attributes;
+            })
             ->values()
             ->all();
 

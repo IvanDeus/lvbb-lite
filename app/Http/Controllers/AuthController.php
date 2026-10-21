@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\RegisterRequest;
 use App\Models\User;
+use App\Services\AvatarStore;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -12,6 +13,8 @@ use Illuminate\View\View;
 
 class AuthController extends Controller
 {
+    public function __construct(private readonly AvatarStore $avatars) {}
+
     public function showLogin(): View
     {
         return view('auth.login');
@@ -55,7 +58,12 @@ class AuthController extends Controller
 
     public function signup(RegisterRequest $request): RedirectResponse
     {
-        Auth::login(User::create($request->validated()));
+        // The row is created with the picked preset so the NOT NULL column is satisfied before an
+        // upload can replace it; save() only writes when the uploaded copy changes the value.
+        $user = User::create($request->avatarAttributes());
+        $this->avatars->save($user, $user->avatar, $request->file('avatar_file'));
+
+        Auth::login($user);
 
         return redirect()->route('post_list');
     }

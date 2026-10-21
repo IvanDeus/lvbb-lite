@@ -5,7 +5,7 @@
 @section('content')
   <article class="post">
     <h2>{{ $post->title }}</h2>
-    <p class="meta">{{ $post->author->username }} &middot; {{ $post->created_at->format('Y-m-d H:i') }}</p>
+    <p class="meta"><img class="avatar" src="{{ $post->author->avatarUrl() }}" alt="" width="24" height="24">{{ $post->author->username }} &middot; {{ $post->created_at->format('Y-m-d H:i') }}</p>
     <p class="body">{{ $post->body }}</p>
     @if ($canManage)
       <div class="actions">
@@ -18,7 +18,7 @@
   <h3>Comments</h3>
   @forelse ($post->comments as $comment)
     <div class="comment">
-      <p class="meta">{{ $comment->author->username }} &middot; {{ $comment->created_at->format('Y-m-d H:i') }}</p>
+      <p class="meta"><img class="avatar" src="{{ $comment->author->avatarUrl() }}" alt="" width="24" height="24">{{ $comment->author->username }} &middot; {{ $comment->created_at->format('Y-m-d H:i') }}</p>
       <p class="body">{{ $comment->body }}</p>
     </div>
   @empty

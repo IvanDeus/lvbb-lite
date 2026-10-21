@@ -12,7 +12,8 @@ First release: the whole application is a port of `djbb-lite` (Django 6.1) to La
 ### Added
 
 - **Laravel 13 port of the board** — `Post` / `Comment` / `User` models, `PostController`,
-  `AuthController`, `AdminController`, three `FormRequest` classes, and Blade views that reuse the
+  `AuthController`, `AdminController`, three `FormRequest` classes mirroring Django's forms, and
+  Blade views that reuse the
   Django templates' markup, inline CSS and wording. URLs, route names, validation messages and
   redirects match `djbb-lite` (19 routes).
 - **Ownership behaves like Django** — `Post::canBeManagedBy()` gates edit/delete, and failing it
@@ -29,8 +30,18 @@ First release: the whole application is a port of `djbb-lite` (Django 6.1) to La
   `setval`, and skipping rows that already exist so it can be re-run safely.
 - **`channel_binding` support for Postgres** — `app/Database/Connectors/PostgresConnector.php`
   appends the parameter to the DSN (Laravel would drop it) and is bound as `db.connector.pgsql`.
-- **Feature tests** — 32 tests over posts, comments, permissions, auth, hashing, admin and the
-  importer, run against the live Neon database inside a transaction per test.
+- **Avatars for every user** — `users.avatar` is `NOT NULL`: either one of the four committed
+  100x100 presets in `public/avatars`, or an `uploads/{id}.{jpeg,png,webp}` file produced by
+  `app/Services/AvatarResizer.php` (GD centre-crop to a square, resample to exactly 100x100,
+  re-encoded in the source format with `imagealphablending` off and `imagesavealpha` on so PNG
+  transparency survives). `AvatarStore` writes it and deletes the file the row stopped pointing at,
+  with `User::AVATAR_UPLOAD` guarding which paths may be named at all. Chosen on signup and
+  changeable at `/profile` (`ProfileRequest` + `ProfileController`), with the picker markup shared
+  by `partials/avatar-picker.blade.php`; avatars render in the header, on the index, under every
+  comment and in the three admin tables. Uploaded files live in the docroot, so there is no
+  `storage:link` step.
+- **Feature tests** — 51 tests over posts, comments, permissions, auth, hashing, admin, avatars and
+  the importer, run against the live Neon database inside a transaction per test.
 
 ### Changed
 
@@ -54,6 +65,12 @@ First release: the whole application is a port of `djbb-lite` (Django 6.1) to La
 - The Laravel tables live in the same schema as djbb-lite's. `config/database.php` lists the 12
   Django tables under `dont_drop` so `migrate:fresh` cannot take them with it; no destructive
   database command is ever appropriate against this connection.
+- `2026_10_22_000000_add_avatar_to_users_table` is the first migration to alter a column on the live
+  shared schema: it adds `users.avatar` nullable, backfills `id % 4` across the four presets, then
+  re-declares it with `->change()` so Postgres sets `NOT NULL`. Laravel 13 does that natively — no
+  `doctrine/dbal` — and the three statements share one transaction, which is exactly what the
+  emulated prepares exist for. `users` is Laravel's own table; Django reads `auth_user`, so the
+  Django side is untouched.
 - `timestamp()` columns are second precision, so imported `created_at` values may round by up to
   one second relative to Django's `timestamptz(6)`.
 - Verified against Neon Postgres 18.6 on the pooled endpoint with the same `DATABASE_URL` and

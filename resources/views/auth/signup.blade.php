@@ -5,7 +5,7 @@
 @section('content')
   <h2>Sign up</h2>
 
-  <form method="post" action="{{ route('signup_store') }}">
+  <form method="post" action="{{ route('signup_store') }}" enctype="multipart/form-data">
     @csrf
     <p>
       <label for="username">Username</label>
@@ -25,6 +25,7 @@
       <input class="field" type="password" name="password" id="password"
              placeholder="Password (min 6 chars)" autocomplete="new-password" minlength="6" required>
     </p>
+    @include('partials.avatar-picker', ['current' => null])
     <button type="submit">Sign up</button>
   </form>
 @endsection

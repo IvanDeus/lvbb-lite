@@ -31,6 +31,7 @@ class AuthTest extends TestCase
             'username' => 'fromdjango',
             'email' => 'fromdjango@example.com',
             'password' => $this->djangoHash('zxc123'),
+            'avatar' => 'fem-a1.png',
             'is_staff' => false,
         ]);
         $this->assertStringStartsWith('pbkdf2_sha256$', $user->password);
@@ -71,6 +72,7 @@ class AuthTest extends TestCase
             'username' => 'newbie',
             'email' => 'newbie@example.com',
             'password' => 'secret123',
+            'avatar' => 'fem-a1.png',
         ])->assertRedirect('/');
 
         $user = User::firstWhere('username', 'newbie');
@@ -85,9 +87,9 @@ class AuthTest extends TestCase
     {
         User::factory()->create(['username' => 'MixedCase']);
 
-        $this->post('/signup', ['username' => 'mixedcase', 'email' => 'a@example.com', 'password' => 'secret123'])
+        $this->post('/signup', ['username' => 'mixedcase', 'email' => 'a@example.com', 'password' => 'secret123', 'avatar' => 'fem-a1.png'])
             ->assertSessionHasErrors('username');
-        $this->post('/signup', ['username' => 'MIXEDCASE', 'email' => 'a@example.com', 'password' => 'secret123'])
+        $this->post('/signup', ['username' => 'MIXEDCASE', 'email' => 'a@example.com', 'password' => 'secret123', 'avatar' => 'fem-a1.png'])
             ->assertSessionHasErrors('username');
 
         $this->assertSame(1, User::whereRaw('lower(username) = ?', ['mixedcase'])->count());
@@ -96,7 +98,7 @@ class AuthTest extends TestCase
     public function test_signup_validates_its_fields(): void
     {
         $this->post('/signup', ['username' => '', 'email' => 'nope', 'password' => '123'])
-            ->assertSessionHasErrors(['username', 'email', 'password']);
+            ->assertSessionHasErrors(['username', 'email', 'password', 'avatar']);
 
         $this->assertGuest();
     }
@@ -105,7 +107,7 @@ class AuthTest extends TestCase
     {
         User::factory()->create(['email' => 'shared@example.com']);
 
-        $this->post('/signup', ['username' => 'second', 'email' => 'shared@example.com', 'password' => 'secret123'])
+        $this->post('/signup', ['username' => 'second', 'email' => 'shared@example.com', 'password' => 'secret123', 'avatar' => 'fem-a1.png'])
             ->assertRedirect('/');
 
         $this->assertSame(2, User::where('email', 'shared@example.com')->count());

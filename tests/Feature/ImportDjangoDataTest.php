@@ -28,10 +28,14 @@ class ImportDjangoDataTest extends TestCase
         foreach (DB::table('auth_user')->get() as $row) {
             // No password comparison: an account that has logged in since the import carries a
             // bcrypt hash, not the pbkdf2 string that was copied over.
+            //
+            // auth_user has no avatar column, so the importer derives one from the primary key -
+            // the same rule the migration used on the rows that were already here.
             $this->assertDatabaseHas('users', [
                 'id' => $row->id,
                 'username' => $row->username,
                 'email' => $row->email,
+                'avatar' => User::presetForId((int) $row->id),
                 'is_staff' => $row->is_staff,
             ]);
         }

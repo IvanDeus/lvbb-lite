@@ -18,15 +18,27 @@ exactly as it was in `base.html`.
 - **`/admin`** — a hand-rolled list of posts and comments with delete buttons, staff only.
 - **Anonymous read access** — browsing needs no account; writing does.
 - **Self-registration** — username, e-mail, password (min 6 chars), auto-login afterwards.
+- **Avatars** — mandatory for every user: one of the four presets in `public/avatars`, or your own
+  JPG/PNG/WebP, centre-cropped to 100&times;100 by GD as it is saved. `/profile` changes it later.
 
 ## Requirements
 
 - PHP 8.3+ with `pdo_pgsql` (`apt install php8.3-pgsql`)
+- PHP's GD extension for the avatar resize (`php -m | grep -i gd`); JPEG, PNG and WebP all need to
+  be compiled in, which the stock `php8.3-gd` package does
 - Composer
 
 ```bash
 composer install
 ```
+
+### Upload limits
+
+`upload_max_filesize` is 2M on this PHP, which is what `max:2048` in the avatar rules mirrors. A
+bigger file never reaches the validator: PHP drops it, and the form answers
+"The avatar file failed to upload." A body over `post_max_size` (8M) arrives without the CSRF token,
+so the request fails as a 419 page rather than a field error — if avatars ever need to accept bigger
+files, raise both directives and keep the `max:` rule in step with `upload_max_filesize`.
 
 ### Environment
 
@@ -117,6 +129,8 @@ internet.
 ## Routes
 
 Paths and route names match djbb-lite; the POST twin of a GET route gets a `_store` suffix.
+`/profile` is the only pair with no Django equivalent — the port needed somewhere to change an
+avatar, and the board has no other page for a user's own data.
 
 | Method     | Path                        | Name                  | Controller action     | Notes                    |
 | ---------- | --------------------------- | --------------------- | --------------------- | ------------------------ |
@@ -132,8 +146,10 @@ Paths and route names match djbb-lite; the POST twin of a GET route gets a `_sto
 | `GET`      | `/login`                    | `login`               | `AuthController@showLogin` |                        |
 | `POST`     | `/login`                    | `login_store`         | `@login`               |                          |
 | `GET`      | `/signup`                   | `signup`              | `@showSignup`          |                          |
-| `POST`     | `/signup`                   | `signup_store`        | `@signup`              |                          |
+| `POST`     | `/signup`                   | `signup_store`        | `@signup`              | avatar required          |
 | `POST`     | `/logout`                   | `logout`              | `@logout`              | POST only, as in Django  |
+| `GET`      | `/profile`                  | `profile`             | `ProfileController@show` | login required         |
+| `POST`     | `/profile`                  | `profile_store`       | `@update`              | login required           |
 | `GET`      | `/admin`                    | `admin_posts`         | `AdminController@posts` | staff                  |
 | `GET`      | `/admin/comments`           | `admin_comments`      | `@comments`            | staff                    |
 | `GET`      | `/admin/post/{post}`        | `admin_post`          | `@post`                | staff                    |
@@ -189,6 +205,9 @@ The two apps share one schema, each with its own tables, and both are live at th
   rows can differ by up to one second.
 - `users` has no `name`, `email_verified_at`, or `password_reset_tokens` column — the port does not
   use them, and there is no password reset in either app.
+- **`users.avatar` is Laravel-only.** `auth_user` has no avatar field, so `board:import-django`
+  derives one from the primary key (`User::presetForId()`, the same `id % 4` rotation the migration
+  used). Django keeps reading `auth_user` untouched; the two apps never write the same column.
 
 ## Project layout
 
@@ -199,25 +218,31 @@ The two apps share one schema, each with its own tables, and both are live at th
 │   ├── Database/Connectors/PostgresConnector.php  # channel_binding into the DSN
 │   ├── Hashing/DjangoHasher.php                # pbkdf2_sha256/sha1 + bcrypt upgrade
 │   ├── Http/
-│   │   ├── Controllers/      # PostController, AuthController, AdminController
+│   │   ├── Controllers/      # PostController, AuthController, AdminController, ProfileController
 │   │   ├── Middleware/       # EnsureUserIsStaff (alias: staff)
-│   │   └── Requests/         # PostRequest, CommentRequest, RegisterRequest
-│   └── Models/               # Post, Comment, User
+│   │   └── Requests/         # PostRequest, CommentRequest, RegisterRequest, ProfileRequest
+│   │                         # and Concerns/GathersAvatar, the shared avatar rules
+│   ├── Models/               # Post, Comment, User
+│   └── Services/             # AvatarResizer (GD crop + resample), AvatarStore (write + cleanup)
 ├── bootstrap/app.php         # routing, staff alias, JSON exception rules
 ├── config/
 │   ├── database.php          # pgsql only, url parsing, dont_drop, emulated prepares
+│   ├── filesystems.php       # avatars disk, rooted at public/avatars
 │   └── hashing.php           # driver=django
 ├── database/
 │   ├── factories/            # User, Post, Comment
-│   ├── migrations/           # users/sessions, posts/comments, drop email unique
+│   ├── migrations/           # users/sessions, posts/comments, drop email unique, avatar to users
 │   └── seeders/              # admin + user test accounts
+├── public/avatars/           # four 100x100 presets, plus uploads/ (gitignored)
 ├── resources/views/
 │   ├── layouts/app.blade.php # header, nav, inline CSS
 │   ├── posts/                # index, show, form, confirm_delete
 │   ├── auth/                 # login, signup
-│   └── admin/                # posts, post, comments
+│   ├── admin/                # posts, post, comments
+│   ├── partials/             # avatar-picker, shared by signup and profile
+│   └── profile.blade.php
 ├── routes/web.php
-└── tests/Feature/            # posts, auth, admin, hashing, import
+└── tests/Feature/            # posts, auth, admin, hashing, import, avatars
 ```
 
 `Post` and `Comment` set `const UPDATED_AT = null` (Django had only `created_at`), `comments()`
@@ -226,7 +251,7 @@ orders by `created_at`, and `password` / `remember_token` stay hidden on the `Us
 ## Tests
 
 ```bash
-php artisan test        # 32 feature tests
+php artisan test        # 51 feature tests
 vendor/bin/pint --test  # style
 ```
 
@@ -246,10 +271,15 @@ accounts, and `artisan serve` bound to loopback. The two things that would actua
 - Put a real server in front (`php artisan serve` is a development tool), keep `sslmode=require`
   and `channel_binding=require` in the connection string, and re-check `SESSION_COOKIE_SECURE` /
   `APP_URL` behind TLS.
+- Give the web server user write access to `public/avatars/uploads` and nothing else in the docroot.
+  Uploaded avatars are served as static files from there, so they are public by design — which is
+  why only 100x100 re-encodes of the three accepted image types ever reach that folder, never an
+  original or anything else.
 
 ## Not included
 
-- Pagination, edit history, nested replies, markdown, attachments.
+- Pagination, edit history, nested replies, markdown, attachments. The avatar upload is the one file
+  the board accepts, and it is resized to 100x100 rather than stored as sent.
 - Password reset / e-mail verification (djbb-lite never had them either).
 - Rate limiting or any spam control on comments.
 - Front-end build tooling — `package.json` and Vite are gone; there is nothing to compile.

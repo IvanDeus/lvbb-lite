@@ -11,7 +11,7 @@
     @forelse ($comments as $comment)
       <tr>
         <td><a href="{{ route('admin_post', $comment->post) }}">{{ $comment->post->title }}</a></td>
-        <td>{{ $comment->author->username }}</td>
+        <td><img class="avatar" src="{{ $comment->author->avatarUrl() }}" alt="" width="24" height="24">{{ $comment->author->username }}</td>
         <td>{{ $comment->created_at->format('Y-m-d H:i') }}</td>
         <td>
           <form method="post" action="{{ route('admin_comment_delete', $comment) }}">

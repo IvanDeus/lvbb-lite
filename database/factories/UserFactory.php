@@ -20,6 +20,7 @@ class UserFactory extends Factory
             'username' => Str::lower(fake()->unique()->userName()).Str::random(4),
             'email' => fake()->unique()->safeEmail(),
             'password' => static::$password ??= Hash::make('password'),
+            'avatar' => fake()->randomElement(User::AVATAR_PRESETS),
             'is_staff' => false,
             'remember_token' => Str::random(10),
         ];

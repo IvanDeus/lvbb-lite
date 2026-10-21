@@ -11,7 +11,7 @@
     @forelse ($posts as $post)
       <tr>
         <td><a href="{{ route('admin_post', $post) }}">{{ $post->title }}</a></td>
-        <td>{{ $post->author->username }}</td>
+        <td><img class="avatar" src="{{ $post->author->avatarUrl() }}" alt="" width="24" height="24">{{ $post->author->username }}</td>
         <td>{{ $post->created_at->format('Y-m-d H:i') }}</td>
         <td>
           <form method="post" action="{{ route('admin_post_delete', $post) }}" onsubmit="return confirm('Delete this post and its comments?')">

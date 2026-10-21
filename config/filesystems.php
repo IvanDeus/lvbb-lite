@@ -47,6 +47,19 @@ return [
             'report' => false,
         ],
 
+        // User avatars live in the docroot, next to the four committed presets, so they are
+        // served with no storage:link. Paths handed to this disk are always relative
+        // ('uploads/12.webp' or 'fem-a1.png'): Flysystem prefixes anything else onto this root,
+        // so an absolute path would silently land under storage/app.
+        'avatars' => [
+            'driver' => 'local',
+            'root' => public_path('avatars'),
+            'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/avatars',
+            'visibility' => 'public',
+            'throw' => true,
+            'report' => false,
+        ],
+
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),

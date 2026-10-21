@@ -4,7 +4,7 @@
 
 @section('content')
   <h2>{{ $post->title }}</h2>
-  <p class="meta">{{ $post->author->username }} &middot; {{ $post->created_at->format('Y-m-d H:i') }} &middot; #{{ $post->id }}</p>
+  <p class="meta"><img class="avatar" src="{{ $post->author->avatarUrl() }}" alt="" width="24" height="24">{{ $post->author->username }} &middot; {{ $post->created_at->format('Y-m-d H:i') }} &middot; #{{ $post->id }}</p>
   <p class="body">{{ $post->body }}</p>
 
   <div class="actions">
@@ -18,7 +18,7 @@
     <tr><th>Author</th><th>Body</th><th>Created</th><th></th></tr>
     @forelse ($post->comments as $comment)
       <tr>
-        <td>{{ $comment->author->username }}</td>
+        <td><img class="avatar" src="{{ $comment->author->avatarUrl() }}" alt="" width="24" height="24">{{ $comment->author->username }}</td>
         <td>{{ Str::limit($comment->body, 60, '…') }}</td>
         <td>{{ $comment->created_at->format('Y-m-d H:i') }}</td>
         <td>
