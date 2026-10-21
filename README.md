@@ -1,11 +1,6 @@
 # LVBB-lite: Laravel Bulletin Board
 
-The djbb-lite board, ported to Laravel. Read it as a working reference for Eloquent models,
-thin controllers, `FormRequest` validation, Blade views, and session auth — with nothing extra
-in the way. No starter kit, no Bootstrap, no Vite, no Tailwind: the CSS is inline in the layout,
-exactly as it was in `base.html`.
-
-**Postgres is the only supported database.** There is no SQLite fallback anywhere in the config.
+A deliberately small bulletin board built with Django. No starter kit, no Bootstrap, no Vite, no Tailwind: the CSS is inline in the layout.
 
 ![PHP](https://img.shields.io/badge/php-8.3-blue) ![Laravel](https://img.shields.io/badge/laravel-13.38-red)
 
