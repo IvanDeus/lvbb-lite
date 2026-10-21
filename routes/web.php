@@ -15,6 +15,10 @@ Route::get('/post/{post}', [PostController::class, 'show'])->whereNumber('post')
 
 Route::get('/user/{username}', [UserController::class, 'show'])->name('user_detail');
 
+// The roll-call behind the users figure in the footer. Not a page a reader came to browse, so
+// staff is the only one who gets the link - and the only one who gets the page.
+Route::middleware(['auth', 'staff'])->get('/members', [UserController::class, 'index'])->name('member_list');
+
 Route::middleware('auth')->group(function () {
     Route::get('/post/new', [PostController::class, 'create'])->name('post_create');
     Route::post('/post/new', [PostController::class, 'store'])->name('post_store');

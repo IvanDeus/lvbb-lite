@@ -73,7 +73,7 @@ controllers, Blade views with inline CSS. No starter kit, no Node build step, no
   `/post/{post}`, and comments POST to the post's own URL. Three paths have no Django counterpart:
   `/profile` and its POST, `POST /profile/password` (Django posts both profile forms to one URL and
   reads the pressed button; separate routes do the same job without that step), and `GET /admin/users`
-  (Django's contrib admin generates it). `/user/{username}` matches Django again.
+  (Django's contrib admin generates it). `/user/{username}` and `/members` match Django again.
 - `PostController::show` **returns** `posts/missing` with status 404 instead of `findOrFail`.
   `APP_DEBUG=true` makes Laravel answer a `NotFoundHttpException` with its own technical page, which is
   the page the board is trying not to show, and a 200 would be a lie to `curl`. Keep the `(int)` cast:
@@ -83,6 +83,13 @@ controllers, Blade views with inline CSS. No starter kit, no Node build step, no
 - The e-mail line on a member page renders from `$request->user()?->is_staff` and nothing else. Avatars
   link there from the index and from a thread; that is the only place a board reader can reach a
   profile that is not their own.
+- `GET /members` is the staff roll-call, gated by `['auth', 'staff']`: a guest goes to the login page
+  and a logged-in writer gets 403. `UserController::index` keeps Django's
+  `COALESCE(GREATEST(MAX, MAX), MAX(users.created_at))` — the join date sits in the `COALESCE`, not
+  inside `GREATEST`, or an account created after its own posts is placed by its signup and activity
+  stops deciding the order. `select('users.*')` next to `groupBy('users.id')` is what lets the
+  non-keyed columns through Postgres. Only a staff footer links the page; the partial prints the plain
+  figure for everyone else.
 - A password change writes through `forceFill` so the `hashed` cast runs and the result is bcrypt, and
   needs no `update_session_auth_hash` equivalent: Laravel's session holds the user's id, not a digest
   of the hash. Do not add one, and do not merge the two `/profile` POSTs.
@@ -97,7 +104,7 @@ controllers, Blade views with inline CSS. No starter kit, no Node build step, no
 
 ```bash
 php artisan serve --host=127.0.0.1 --port=7112   # dev server (0.0.0.0 to answer on every interface)
-php artisan test                                 # 84 feature tests against Neon
+php artisan test                                 # 93 feature tests against Neon
 vendor/bin/pint                                  # fix style (pint --test to check)
 php artisan migrate                              # apply Laravel migrations
 ```

@@ -217,6 +217,16 @@ class AvatarTest extends TestCase
             ->assertSee('name="avatar_file"', false);
     }
 
+    public function test_the_profile_page_shows_the_current_avatar_at_its_full_size(): void
+    {
+        $user = User::factory()->create(['username' => 'donne', 'avatar' => 'fem-a1.png']);
+
+        $this->actingAs($user)->get('/profile')->assertOk()->assertSee(
+            '<img class="avatar-full" src="'.url('/avatars/fem-a1.png').'" alt="donne&#39;s avatar" width="100" height="100">',
+            false
+        );
+    }
+
     public function test_switching_between_presets_touches_no_file(): void
     {
         $user = User::factory()->create(['avatar' => 'fem-a1.png']);

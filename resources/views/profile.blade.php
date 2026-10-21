@@ -5,10 +5,10 @@
 @section('content')
   <h2>Profile</h2>
 
-  <p class="meta">
-    <img class="avatar" src="{{ $user->avatarUrl() }}" alt="" width="24" height="24">
-    {{ $user->username }} &middot; {{ $user->email }}
+  <p>
+    <img class="avatar-full" src="{{ $user->avatarUrl() }}" alt="{{ $user->username }}&#39;s avatar" width="100" height="100">
   </p>
+  <p class="meta">{{ $user->username }} &middot; {{ $user->email }}</p>
 
   <form method="post" action="{{ route('profile_store') }}" enctype="multipart/form-data">
     @csrf

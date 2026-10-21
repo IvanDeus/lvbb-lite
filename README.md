@@ -21,13 +21,17 @@ exactly as it was in `base.html`.
 - **Anonymous read access** — browsing needs no account; writing does.
 - **Self-registration** — username, e-mail, password (min 6 chars), auto-login afterwards.
 - **Avatars** — mandatory for every user: one of the four presets in `public/avatars`, or your own
-  JPG/PNG/WebP, centre-cropped to 100&times;100 by GD as it is saved. `/profile` changes it later.
+  JPG/PNG/WebP, centre-cropped to 100&times;100 by GD as it is saved. `/profile` changes it later and
+  shows the current one at that size.
 - **Change password** — `/profile` takes a new password too, against the current one, and leaves you
   signed in through your own change.
 - **A 404 that knows where it is** — a post id with nothing behind it renders the board's own page
   and carries the visitor back to the index two seconds later, with status 404 intact.
 - **A page per member** — every avatar on the board links to `/user/{name}`, which shows the picture
   at its full 100&times;100. The e-mail address there is visible to staff only.
+- **A members list** — `/members` is a table of every writer — face, name, and whether they are an
+  `admin` or a `member` — with whoever wrote most recently at the top. Staff only, and the users
+  figure in the footer is the only way there.
 - **Footer counts** — a small panel above the credit line on every page, holding three numbers:
   members, replies, and topics. A topic is a post here.
 
@@ -159,6 +163,7 @@ contrib admin generates that page, this one is written).
 | `GET`      | `/post/{post}/delete`       | `post_delete`         | `@confirmDelete`       | author or staff          |
 | `POST`     | `/post/{post}/delete`       | `post_delete_store`   | `@destroy`             | author or staff          |
 | `GET`      | `/user/{username}`          | `user_detail`         | `UserController@show` | public, e-mail staff-only |
+| `GET`      | `/members`                  | `member_list`         | `UserController@index` | staff, linked from the footer |
 | `GET`      | `/login`                    | `login`               | `AuthController@showLogin` |                        |
 | `POST`     | `/login`                    | `login_store`         | `@login`               |                          |
 | `GET`      | `/signup`                   | `signup`              | `@showSignup`          |                          |
@@ -194,7 +199,9 @@ public function canBeManagedBy(?User $user): bool
 A user who fails the check is **redirected to the post rather than shown a 403**, so the edit and
 delete URLs do not leak which post IDs exist versus which are simply yours. `/admin` is the
 opposite case: `EnsureUserIsStaff` (aliased as `staff` in `bootstrap/app.php`) answers `403` to a
-logged-in non-staff user and redirects a guest to `/login` — the same as Django's admin.
+logged-in non-staff user and redirects a guest to `/login` — the same as Django's admin. `/members`
+sits behind that same pair, and the footer figure that links to it is rendered as a link for staff
+alone.
 
 Django's `post_detail` accepted comment POSTs from anonymous visitors and relied on the template
 to hide the form; here `comment_store` sits behind the `auth` middleware, which is the same
@@ -233,6 +240,39 @@ What was not copied over is the search box: Django's `search_fields` covered two
 instance has five accounts. Accounts are edited nowhere in this app — the seeder and
 `board:import-django` make them, `/profile` changes an avatar and a password, and Django keeps its own
 user admin because it has one.
+
+### A roll-call of the board
+
+`/members` is the staff-only list of every writer — face, name, and `admin` or `member` — with whoever
+did something most recently at the top. Django's `member_list` annotates
+`Coalesce(Greatest(Max, Max), F('date_joined'))`; `UserController::index` spells the same expression
+out for the query builder:
+
+```php
+->selectRaw('COALESCE(GREATEST(MAX(posts.created_at), MAX(comments.created_at)), MAX(users.created_at)) AS last_activity')
+->leftJoin('posts', 'posts.author_id', '=', 'users.id')
+->leftJoin('comments', 'comments.author_id', '=', 'users.id')
+->groupBy('users.id')
+->orderByDesc('last_activity')
+```
+
+Two Postgres rules make that one query enough. `GREATEST` returns NULL only when *every* argument is,
+so a writer with posts and no comments is still placed by their newest post — and that is also why the
+join date belongs in the `COALESCE` rather than as a fourth argument: folded in there, it would floor
+every account at its own signup and a year-old topic would never fall below someone who joined last
+week. And `GROUP BY users.id` groups by the primary key, which is what lets every other `users` column
+through the `SELECT *` beside it. The alias is a legal `ORDER BY` key, so the expression is written
+once.
+
+The refusals are not new code: the route carries `['auth', 'staff']`, the same pair the `/admin` group
+uses, so a guest goes to `/login` and a writer who is not staff gets `403`. `users/index.blade.php` is
+a table with links out to the member pages and nothing else. The way in is the users figure in the
+footer, which `partials/stats.blade.php` wraps in an `<a>` only when `auth()->user()?->is_staff` — the
+wording every other visitor reads is unchanged, character for character.
+
+One difference in the data is worth knowing: these columns are `timestamp(0)`, so two accounts created
+in the same second tie, and Postgres breaks the tie as it likes. Django's are microsecond and its
+order there is total.
 
 ### Changing a password
 
@@ -367,14 +407,14 @@ importer stands down until it is pointed at a database where the Django tables l
 ├── resources/views/
 │   ├── layouts/app.blade.php # header, nav, inline CSS, flashes, footer
 │   ├── posts/                # index, show, form, confirm_delete, missing
-│   ├── users/show.blade.php  # one member, avatar at full size
+│   ├── users/                # show (one member, avatar at full size), index (the staff roll-call)
 │   ├── auth/                 # login, signup
 │   ├── admin/                # posts, post, comments, users (read-only)
 │   ├── partials/             # avatar-picker (signup + profile), stats (footer)
 │   └── profile.blade.php     # avatar picker and password form, posting separately
 ├── routes/web.php
 └── tests/Feature/            # posts, auth, admin, hashing, import, avatars, member page,
-                              # footer counts, missing post, password change
+                              # members list, footer counts, missing post, password change
 ```
 
 `Post` and `Comment` set `const UPDATED_AT = null` (Django had only `created_at`), `comments()`
@@ -383,7 +423,7 @@ orders by `created_at`, and `password` / `remember_token` stay hidden on the `Us
 ## Tests
 
 ```bash
-php artisan test        # 84 feature tests, 2 of which skip without the Django tables
+php artisan test        # 93 feature tests, 2 of which skip without the Django tables
 vendor/bin/pint --test  # style
 ```
 

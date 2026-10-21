@@ -11,6 +11,23 @@ First release: the whole application is a port of `djbb-lite` (Django 6.1) to La
 
 ### Added
 
+- **A members list, sorted by last activity** — `/members`, the same one plain table `djbb-lite`
+  shows its staff: face, name, and `admin` or `member`, whoever wrote most recently at the top.
+  `UserController::index` reads the ordering in one grouped query —
+  `COALESCE(GREATEST(MAX(posts.created_at), MAX(comments.created_at)), MAX(users.created_at))`,
+  which is Django's `Coalesce(Greatest(Max, Max), F('date_joined'))` spelled out: `GREATEST` returns
+  NULL only when every argument is, so the join date belongs in the `COALESCE` and not among the
+  three, or a writer whose only topic is a year old would never fall below a newcomer.
+  `GROUP BY users.id` is what lets `users.*` through beside it, and Postgres accepts the select alias
+  as the `ORDER BY` key. The route carries `['auth', 'staff']`, the pair `/admin` already uses, so
+  the split refusal — a guest to `/login`, a writer to `403` — cost no new code. `partials/stats.blade.php`
+  wraps the users figure in an `<a>` only when `auth()->user()?->is_staff`, which leaves the wording
+  byte for byte what every other visitor was already reading.
+- **The profile page shows the current avatar at its full size** — the signed-in user's own picture
+  was the 24×24 header size, inline before their name; it is now the 100×100 the file actually is,
+  in the `avatar-full` circle the member page uses, with `username · e-mail` on its own line below.
+  Nothing is scaled up to get there: the four presets are committed at 100×100 and every upload is
+  resized to it on the way in.
 - **Board counts in the footer** — the same bordered panel `djbb-lite` puts above the credit line on
   every page, with this board's numbers in it: `5 users · 4 comments · 3 topics`. A topic is a post
   here too, so the trio is members,
@@ -90,10 +107,10 @@ First release: the whole application is a port of `djbb-lite` (Django 6.1) to La
   by `partials/avatar-picker.blade.php`; avatars render in the header, on the index, under every
   comment and in the three admin tables. Uploaded files live in the docroot, so there is no
   `storage:link` step.
-- **Feature tests** — 84 tests over posts, comments, permissions, auth, hashing, admin, avatars, the
-  importer, the member page, the footer counts, the missing-post page and password changes, run
-  against the live Neon database inside a transaction per test. The two importer cases skip
-  themselves while `auth_user` is absent from the connected database.
+- **Feature tests** — 93 tests over posts, comments, permissions, auth, hashing, admin, avatars, the
+  importer, the member page, the members list, the footer counts, the missing-post page and password
+  changes, run against the live Neon database inside a transaction per test. The two importer cases
+  skip themselves while `auth_user` is absent from the connected database.
 
 ### Changed
 
