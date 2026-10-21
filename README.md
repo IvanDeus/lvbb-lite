@@ -1,6 +1,6 @@
 # LVBB-lite: Laravel Bulletin Board
 
-A deliberately small bulletin board built with Django. No starter kit, no Bootstrap, no Vite, no Tailwind: the CSS is inline in the layout.
+A deliberately small bulletin board built with Laravel. No starter kit, no Bootstrap, no Vite, no Tailwind: the CSS is inline in the layout.
 
 ![PHP](https://img.shields.io/badge/php-8.3-blue) ![Laravel](https://img.shields.io/badge/laravel-13.38-red)
 
