@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -30,6 +32,11 @@ class User extends Authenticatable
         return [
             'is_staff' => 'boolean',
             'password' => 'hashed',
+            // Never a column: an alias withLastActivity() selects. Rows read without that scope have
+            // no such key, and a null value is returned before any cast runs, so this only fires on
+            // the two tables that ask for it. Cast as a datetime so both views keep the board's one
+            // timestamp convention, ->format('Y-m-d H:i'), exactly as the real created_at columns do.
+            'last_activity' => 'datetime',
         ];
     }
 
@@ -41,6 +48,25 @@ class User extends Authenticatable
     public function comments(): HasMany
     {
         return $this->hasMany(Comment::class);
+    }
+
+    /**
+     * The one definition of "the last thing this account did on the board", spelled the way
+     * djbb-lite's `member_list` annotates it: Coalesce(Greatest(Max, Max), join date). GREATEST
+     * returns NULL only when every argument is, so a writer is placed by their newest topic or newest
+     * reply and the day they joined counts as activity only for an account that has written nothing
+     * at all — the join date has to sit in the COALESCE, not inside the GREATEST, or every account is
+     * floored at its own signup and activity stops deciding the order. GROUP BY users.id is what lets
+     * users.* through beside it, and the alias is a legal ORDER BY key.
+     */
+    #[Scope]
+    public function withLastActivity(Builder $query): void
+    {
+        $query->select('users.*')
+            ->selectRaw('COALESCE(GREATEST(MAX(posts.created_at), MAX(comments.created_at)), MAX(users.created_at)) AS last_activity')
+            ->leftJoin('posts', 'posts.author_id', '=', 'users.id')
+            ->leftJoin('comments', 'comments.author_id', '=', 'users.id')
+            ->groupBy('users.id');
     }
 
     /**

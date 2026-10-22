@@ -19,11 +19,14 @@ class AdminController extends Controller
 
     /**
      * The board's people, for looking at and not for touching. There is no add, edit or delete
-     * route here to withhold: this table is the whole of what the admin offers a user row.
+     * route here to withhold: this table is the whole of what the admin offers a user row. The
+     * `Last action` column is the roll-call's own, read through User::withLastActivity() rather than
+     * a second copy of the SQL - and the ordering stays alphabetical, so here the column is a fact
+     * about the account rather than the key its row is sorted by.
      */
     public function users(): View
     {
-        return view('admin.users', ['users' => User::orderBy('username')->get()]);
+        return view('admin.users', ['users' => User::query()->withLastActivity()->orderBy('username')->get()]);
     }
 
     public function post(Post $post): View

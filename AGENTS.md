@@ -84,12 +84,23 @@ controllers, Blade views with inline CSS. No starter kit, no Node build step, no
   link there from the index and from a thread; that is the only place a board reader can reach a
   profile that is not their own.
 - `GET /members` is the staff roll-call, gated by `['auth', 'staff']`: a guest goes to the login page
-  and a logged-in writer gets 403. `UserController::index` keeps Django's
+  and a logged-in writer gets 403. `User::withLastActivity()` keeps Django's
   `COALESCE(GREATEST(MAX, MAX), MAX(users.created_at))` — the join date sits in the `COALESCE`, not
   inside `GREATEST`, or an account created after its own posts is placed by its signup and activity
   stops deciding the order. `select('users.*')` next to `groupBy('users.id')` is what lets the
-  non-keyed columns through Postgres. Only a staff footer links the page; the partial prints the plain
-  figure for everyone else.
+  non-keyed columns through Postgres. The scope serves `/members` and `/admin/users` from one
+  definition, and it prints: `last_activity` is declared a `datetime` in `casts()`, because it is an
+  alias and never a column, and `->format()` on the raw string is a fatal call-on-a-member-function.
+  Only a staff footer links the page; the partial prints the plain figure for everyone else.
+- `POST /members/{member}/role` (`member_role_store`; no GET twin, like `password_store`) is the only
+  route in this app that writes another user's row, and it moves `is_staff` alone — through
+  `forceFill`, since the attribute stays outside `#[Fillable]` and `fill()` would drop the click.
+  `abort_if` on the actor's own id keeps an admin from switching themselves off, and the template
+  draws no button there either. Both ids get an `(int)` cast: emulated prepares hand back Postgres
+  ids as strings while a factory-inserted model carries an int, so a bare `===` would offer the admin
+  their own button. Route and method parameter are both named `$member` — a mismatch leaves implicit
+  binding an empty model and the `save()` becomes an INSERT. The write stays out of the `admin`
+  prefix: `/admin/users` must keep the no-form, no-button, no-anchor shape its tests assert.
 - A password change writes through `forceFill` so the `hashed` cast runs and the result is bcrypt, and
   needs no `update_session_auth_hash` equivalent: Laravel's session holds the user's id, not a digest
   of the hash. Do not add one, and do not merge the two `/profile` POSTs.
@@ -104,7 +115,7 @@ controllers, Blade views with inline CSS. No starter kit, no Node build step, no
 
 ```bash
 php artisan serve --host=127.0.0.1 --port=7112   # dev server (0.0.0.0 to answer on every interface)
-php artisan test                                 # 93 feature tests against Neon
+php artisan test                                 # 104 feature tests against Neon
 vendor/bin/pint                                  # fix style (pint --test to check)
 php artisan migrate                              # apply Laravel migrations
 ```

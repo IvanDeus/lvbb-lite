@@ -11,8 +11,8 @@ A deliberately small bulletin board built with Laravel. No starter kit, no Boots
 - **Author-only editing** — you can edit or delete your own posts.
 - **Staff override** — staff users can edit or delete *anyone's* post.
 - **`/admin`** — a hand-rolled list of posts and comments with delete buttons, staff only.
-- **Read-only profiles in the admin** — `/admin/users` lists every writer's avatar, name and e-mail.
-  The list is a table with no form, no button and no link in it.
+- **Read-only profiles in the admin** — `/admin/users` lists every writer's avatar, name, e-mail and
+  last action. The list is a table with no form, no button and no link in it.
 - **Anonymous read access** — browsing needs no account; writing does.
 - **Self-registration** — username, e-mail, password (min 6 chars), auto-login afterwards.
 - **Avatars** — mandatory for every user: one of the four presets in `public/avatars`, or your own
@@ -24,9 +24,10 @@ A deliberately small bulletin board built with Laravel. No starter kit, no Boots
   and carries the visitor back to the index two seconds later, with status 404 intact.
 - **A page per member** — every avatar on the board links to `/user/{name}`, which shows the picture
   at its full 100&times;100. The e-mail address there is visible to staff only.
-- **A members list** — `/members` is a table of every writer — face, name, and whether they are an
-  `admin` or a `member` — with whoever wrote most recently at the top. Staff only, and the users
-  figure in the footer is the only way there.
+- **A members list** — `/members` is a table of every writer — face, name, whether they are an
+  `admin` or a `member`, and when they last did something here — with whoever wrote most recently at
+  the top. Staff only, and the users figure in the footer is the only way there. Every row but the
+  admin's own carries a button that switches that account between the two types.
 - **Footer counts** — a small panel above the credit line on every page, holding three numbers:
   members, replies, and topics. A topic is a post here.
 
@@ -159,6 +160,7 @@ contrib admin generates that page, this one is written).
 | `POST`     | `/post/{post}/delete`       | `post_delete_store`   | `@destroy`             | author or staff          |
 | `GET`      | `/user/{username}`          | `user_detail`         | `UserController@show` | public, e-mail staff-only |
 | `GET`      | `/members`                  | `member_list`         | `UserController@index` | staff, linked from the footer |
+| `POST`     | `/members/{member}/role`    | `member_role_store`   | `@updateRole`          | staff, never the admin's own row |
 | `GET`      | `/login`                    | `login`               | `AuthController@showLogin` |                        |
 | `POST`     | `/login`                    | `login_store`         | `@login`               |                          |
 | `GET`      | `/signup`                   | `signup`              | `@showSignup`          |                          |
@@ -196,7 +198,9 @@ delete URLs do not leak which post IDs exist versus which are simply yours. `/ad
 opposite case: `EnsureUserIsStaff` (aliased as `staff` in `bootstrap/app.php`) answers `403` to a
 logged-in non-staff user and redirects a guest to `/login` — the same as Django's admin. `/members`
 sits behind that same pair, and the footer figure that links to it is rendered as a link for staff
-alone.
+alone. `POST /members/{member}/role`, which switches a writer between the two types, sits behind it
+too, with one refusal added: the row of the admin who is clicking answers `403` as well, because no
+path from that page may end the right to use it.
 
 Django's `post_detail` accepted comment POSTs from anonymous visitors and relied on the template
 to hide the form; here `comment_store` sits behind the `auth` middleware, which is the same
@@ -219,9 +223,9 @@ the framework's 404; the board has no missing-member page, only a missing-*post*
 
 ### Looking at profiles in the admin
 
-`/admin/users` is a read-only window onto the board's people: avatar, name, e-mail, in username
-order, behind the same `staff` middleware as the rest of `/admin` — a guest goes to `/login`, a writer
-gets `403`.
+`/admin/users` is a read-only window onto the board's people: avatar, name, e-mail and last action, in
+username order, behind the same `staff` middleware as the rest of `/admin` — a guest goes to `/login`, a
+writer gets `403`.
 
 `admin/users.blade.php` is a `<table>` with no form, no button and no anchor in it, so there is
 nothing to disable. Django had to work for the same result: `ProfileAdmin` refusing add, change and
@@ -229,26 +233,28 @@ delete is what puts its change page into view mode, and every field then has to 
 `readonly_fields` to appear at all, because the model only holds the avatar string while name and
 e-mail are methods reading through the one-to-one — with a `select_related` so the list does not fetch
 each user separately. Here avatar, name, e-mail and the staff flag all live on the `users` row, so one
-query reads the page and there is no relation to follow.
+query reads the page and there is no relation to follow; the fourth column is the roll-call's own,
+reached through the same `User::withLastActivity()` scope, and it is still only a value to read.
 
 What was not copied over is the search box: Django's `search_fields` covered two text fields, and this
-instance has five accounts. Accounts are edited nowhere in this app — the seeder and
-`board:import-django` make them, `/profile` changes an avatar and a password, and Django keeps its own
+instance has five accounts. Nothing here is edited either — accounts are made by the seeder and
+`board:import-django`, `/profile` changes an avatar and a password, and the one thing an admin
+changes about somebody else is their type, which happens on the roll-call below. Django keeps its own
 user admin because it has one.
 
 ### A roll-call of the board
 
-`/members` is the staff-only list of every writer — face, name, and `admin` or `member` — with whoever
-did something most recently at the top. Django's `member_list` annotates
-`Coalesce(Greatest(Max, Max), F('date_joined'))`; `UserController::index` spells the same expression
-out for the query builder:
+`/members` is the staff-only list of every writer — face, name, `admin` or `member`, and when they last
+did something here — with whoever did something most recently at the top. Django's `member_list`
+annotates `Coalesce(Greatest(Max, Max), F('date_joined'))`; the same expression here is a scope on the
+model, `User::withLastActivity()`, so the roll-call and `/admin/users` read one definition of it:
 
 ```php
-->selectRaw('COALESCE(GREATEST(MAX(posts.created_at), MAX(comments.created_at)), MAX(users.created_at)) AS last_activity')
-->leftJoin('posts', 'posts.author_id', '=', 'users.id')
-->leftJoin('comments', 'comments.author_id', '=', 'users.id')
-->groupBy('users.id')
-->orderByDesc('last_activity')
+$query->select('users.*')
+    ->selectRaw('COALESCE(GREATEST(MAX(posts.created_at), MAX(comments.created_at)), MAX(users.created_at)) AS last_activity')
+    ->leftJoin('posts', 'posts.author_id', '=', 'users.id')
+    ->leftJoin('comments', 'comments.author_id', '=', 'users.id')
+    ->groupBy('users.id');
 ```
 
 Two Postgres rules make that one query enough. `GREATEST` returns NULL only when *every* argument is,
@@ -256,18 +262,52 @@ so a writer with posts and no comments is still placed by their newest post — 
 join date belongs in the `COALESCE` rather than as a fourth argument: folded in there, it would floor
 every account at its own signup and a year-old topic would never fall below someone who joined last
 week. And `GROUP BY users.id` groups by the primary key, which is what lets every other `users` column
-through the `SELECT *` beside it. The alias is a legal `ORDER BY` key, so the expression is written
-once.
+through the `SELECT *` beside it. The alias is a legal `ORDER BY` key, so the roll-call sorts on it with
+`->orderByDesc('last_activity')` — the same value the `Last action` column prints, which is why the two
+can never disagree. `/admin/users` calls the scope too, but keeps its username order.
+
+`last_activity` is never a column, only an alias, so it arrives as a string and `->format()` on it would
+be a fatal call-on-a-string. `casts()` therefore declares it a `datetime`, which also keeps both tables
+on the board's one timestamp convention. A row read without the scope has no such key at all, and
+Laravel returns null for a missing attribute before any cast runs, so the declaration cannot break a
+plain `User::find`.
 
 The refusals are not new code: the route carries `['auth', 'staff']`, the same pair the `/admin` group
 uses, so a guest goes to `/login` and a writer who is not staff gets `403`. `users/index.blade.php` is
-a table with links out to the member pages and nothing else. The way in is the users figure in the
-footer, which `partials/stats.blade.php` wraps in an `<a>` only when `auth()->user()?->is_staff` — the
-wording every other visitor reads is unchanged, character for character.
+a table whose rows link out to the member pages and, since the column arrived, end in one button. The
+way in is the users figure in the footer, which `partials/stats.blade.php` wraps in an `<a>` only when
+`auth()->user()?->is_staff` — the wording every other visitor reads is unchanged, character for
+character.
 
 One difference in the data is worth knowing: these columns are `timestamp(0)`, so two accounts created
 in the same second tie, and Postgres breaks the tie as it likes. Django's are microsecond and its
 order there is total.
+
+### Switching a member's type
+
+Every row of that table but the visitor's own ends in a button — `make admin` on a member, `make
+member` on an admin — posting to `POST /members/{member}/role`. The name ends in `_store` because there
+is no GET twin, the case `password_store` already set, and the two members routes now sit in one
+`['auth', 'staff']` group. It is *not* under the `/admin` prefix: `/admin/users` is the page whose whole
+contract is that it writes nothing.
+
+`is_staff` is the only field that moves, and `forceFill` is what lets it. The attribute sits outside
+`#[Fillable]` on purpose — an account may not make itself staff by POSTing a field — which means
+`fill()` would silently drop it and the button would look broken. `UserController::updateRole` writes
+the one attribute directly, the way `ProfileController` and `AuthController` already had to.
+
+The acting admin's own row is designed against self-lockout: the template draws no button there, and
+`abort_if((int) $member->id === (int) $request->user()->id, 403)` refuses a forged POST naming it.
+Those two casts are load-bearing rather than tidy — with emulated prepares
+on PgBouncer every id read back from Postgres is a *string*, while a model the factory just inserted has
+an int one, so a bare `===` would hand the admin their own button. `PostController` casts for
+the same reason. The route parameter and the method parameter must both stay named `$member`, or
+implicit binding matches nothing and the `save()` becomes an INSERT.
+
+Nobody is told to log in again, and no `is_superuser` is involved: this app has no such column, so the
+two types are the whole of it. The answer is a redirect back to the roll-call with a status line —
+`user is now an admin.` — which `layouts/app.blade.php` renders above the table, next to the row that
+now shows the other word.
 
 ### Changing a password
 
@@ -409,16 +449,19 @@ importer stands down until it is pointed at a database where the Django tables l
 │   └── profile.blade.php     # avatar picker and password form, posting separately
 ├── routes/web.php
 └── tests/Feature/            # posts, auth, admin, hashing, import, avatars, member page,
-                              # members list, footer counts, missing post, password change
+                              # members list, footer counts, missing post, password change,
+                              # the type switch
 ```
 
 `Post` and `Comment` set `const UPDATED_AT = null` (Django had only `created_at`), `comments()`
-orders by `created_at`, and `password` / `remember_token` stay hidden on the `User` model.
+orders by `created_at`, and `password` / `remember_token` stay hidden on the `User` model. `is_staff`
+stays out of `#[Fillable]` for the same reason it stays out of a form: nothing a visitor posts may make
+them staff, so the role switch writes it with `forceFill` after its own staff check.
 
 ## Tests
 
 ```bash
-php artisan test        # 93 feature tests, 2 of which skip without the Django tables
+php artisan test        # 104 feature tests, 2 of which skip without the Django tables
 vendor/bin/pint --test  # style
 ```
 

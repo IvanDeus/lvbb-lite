@@ -35,7 +35,7 @@ class MemberListTest extends TestCase
     {
         $this->get('/members')
             ->assertOk()
-            ->assertSee('<th>Avatar</th><th>Name</th><th>Type</th>', false)
+            ->assertSee('<th>Avatar</th><th>Name</th><th>Type</th><th>Last action</th><th></th>', false)
             ->assertSee('<td><a href="'.route('user_detail', 'donne').'">donne</a></td>', false)
             ->assertSee('width="48" height="48"', false)
             ->assertSee('<td>member</td>', false)
@@ -59,6 +59,30 @@ class MemberListTest extends TestCase
         // Neither silent writer has a row in posts or comments, so their joining - eight and ten
         // days back - is what places them, and both sit above a topic a year old.
         $this->assertSame(['herbert', 'keeper', 'donne'], $this->names());
+    }
+
+    public function test_a_row_prints_the_activity_that_places_it(): void
+    {
+        $post = Post::factory()->for($this->writer, 'author')->create(['created_at' => now()->subHours(5)]);
+        $stamp = $post->fresh()->created_at->format('Y-m-d H:i');
+
+        // The printed value is the sort key itself, so the column and the order cannot disagree: donne
+        // is placed by this topic and says so in her own row.
+        $this->assertStringContainsString(
+            'donne</a></td> <td>member</td> <td>'.$stamp.'</td>',
+            $this->oneLine($this->get('/members')->getContent()),
+        );
+    }
+
+    public function test_the_actors_own_row_offers_no_button(): void
+    {
+        $page = $this->get('/members')->getContent();
+
+        // Every row but the visitor's own can be switched. Flipping keeper off staff would end this
+        // page for the one account allowed on it, so the button is not drawn at all.
+        $this->assertStringNotContainsString('action="'.route('member_role_store', $this->keeper).'"', $page);
+        $this->assertStringContainsString('action="'.route('member_role_store', $this->writer).'"', $page);
+        $this->assertStringContainsString('make admin', $page);
     }
 
     public function test_a_writer_is_refused(): void

@@ -16,8 +16,12 @@ Route::get('/post/{post}', [PostController::class, 'show'])->whereNumber('post')
 Route::get('/user/{username}', [UserController::class, 'show'])->name('user_detail');
 
 // The roll-call behind the users figure in the footer. Not a page a reader came to browse, so
-// staff is the only one who gets the link - and the only one who gets the page.
-Route::middleware(['auth', 'staff'])->get('/members', [UserController::class, 'index'])->name('member_list');
+// staff is the only one who gets the link - and the only one who gets the page. The one write here
+// flips a row's type; /admin/users stays read-only, which is why this lives outside that prefix.
+Route::middleware(['auth', 'staff'])->group(function () {
+    Route::get('/members', [UserController::class, 'index'])->name('member_list');
+    Route::post('/members/{member}/role', [UserController::class, 'updateRole'])->whereNumber('member')->name('member_role_store');
+});
 
 Route::middleware('auth')->group(function () {
     Route::get('/post/new', [PostController::class, 'create'])->name('post_create');

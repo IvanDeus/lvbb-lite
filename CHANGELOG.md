@@ -11,6 +11,20 @@ First release: the whole application is a port of `djbb-lite` (Django 6.1) to La
 
 ### Added
 
+- **The last action is printed, and a type can be switched** — the roll-call gained a `Last action`
+  column showing the timestamp it had always sorted by, and an action column: every row but the
+  visitor's own ends in a `make admin` / `make member` button posting to
+  `POST /members/{member}/role` (`UserController@updateRole`). The ordering query moved out of
+  `UserController::index` into `User::withLastActivity()`, so `/members` and `/admin/users` — which
+  gained the same column — read one definition of it, and `last_activity` is declared a `datetime` in
+  `casts()`: an alias is a string until it is cast, and `->format()` on one is fatal. `is_staff` is
+  the only field the route moves, and it needs `forceFill` because the attribute stays outside
+  `#[Fillable]`, which is what stops a visitor POSTing themselves into staff. Self-lockout is
+  designed out: no button on the actor's row, `abort_if(..., 403)` on a forged POST naming it, and an
+  `(int)` cast on both sides of that comparison because emulated prepares return Postgres ids as
+  strings. The answer is a redirect back to the list with `user is now an admin.` in the flash the
+  layout already renders. `is_staff` is the whole of the rank here — no `is_superuser` column exists
+  to touch.
 - **A members list, sorted by last activity** — `/members`, the same one plain table `djbb-lite`
   shows its staff: face, name, and `admin` or `member`, whoever wrote most recently at the top.
   `UserController::index` reads the ordering in one grouped query —
