@@ -6,7 +6,8 @@ A deliberately small bulletin board built with Laravel. No starter kit, no Boots
 
 ## Features
 
-- **Posts** — title + body, newest first, body excerpted on the index like `truncatechars:240`.
+- **Posts** — title + body, newest first, with the index excerpting the body to 240 characters, the
+  ellipsis counted.
 - **Comments** — listed under each post, created by logged-in users.
 - **Author-only editing** — you can edit or delete your own posts.
 - **Staff override** — staff users can edit or delete *anyone's* post.
@@ -64,15 +65,14 @@ missing connection string is an immediate error instead of a mysterious 500.
 
 > **Do not create `.env.local` here.** Laravel loads `.env.{APP_ENV}` *instead of* `.env` when
 > `APP_ENV` is in the process environment — and `artisan serve` inherits `APP_ENV=local` from
-> your shell. A `.env.local` copied over from djbb-lite would hide `APP_KEY` and every request
-> would fail with "No application encryption key has been specified". `DATABASE_URL` belongs in
-> `.env`, next to the key.
+> your shell. A `.env.local` would then hide `APP_KEY` and every request would fail with "No
+> application encryption key has been specified". `DATABASE_URL` belongs in `.env`, next to the key.
 
 `ConfigurationUrlParser` splits the URL into host / port / database / user / password and merges
 its query parameters into the connection config, so `sslmode` and `channel_binding` arrive from
 the URL itself; `DB_SSLMODE` / `DB_CHANNEL_BINDING` are the fallbacks for the split-variable form.
 
-#### Getting the DB URL from the Neon console
+#### 1a. Getting the DB URL from the Neon console
 
 The Neon CLI signs in through a browser OAuth callback on `127.0.0.1`, which never arrives on a
 headless server — `neon login` times out there. Take the string from the web console instead:
@@ -81,6 +81,60 @@ headless server — `neon login` times out there. Take the string from the web c
 2. Open your project → **Connection Details**.
 3. Copy the **pooled** endpoint (the one ending in `-pooler…`).
 4. Paste it into `.env` as `DATABASE_URL=`; append `&channel_binding=require` if it is missing.
+
+#### 1b. Setting up a local PostgreSQL database
+
+Neon is not a requirement to run the board. Postgres is the only supported engine either way, so a
+local cluster is a straight stand-in and every command in
+[Setting up a database](#setting-up-a-database) works against it unchanged.
+
+1.  **Install PostgreSQL** — 16 or newer is what the board is written against — and PHP's driver with
+    it:
+
+    ```bash
+    apt install postgresql php8.3-pgsql
+    php -m | grep -i pgsql          # proves the driver landed
+    ```
+
+2.  **Create the role and the database**, as the `postgres` superuser — `sudo -u postgres psql`:
+
+    ```sql
+    CREATE ROLE lvbb_user LOGIN PASSWORD 'your_password';
+    CREATE DATABASE lvbb_db OWNER lvbb_user;
+    ```
+
+    The role owns the database it is handed to `php artisan migrate`, because the migrations create,
+    alter and drop tables. A `GRANT` over somebody else's schema is where a run stops halfway with a
+    permission error, having left the earlier tables behind.
+
+3.  **Point `.env` at it**, in place of the console string:
+
+    ```bash
+    DATABASE_URL=postgresql://lvbb_user:your_password@127.0.0.1:5432/lvbb_db?sslmode=disable&channel_binding=disable
+    ```
+
+    Both query parameters are needed against a cluster with `ssl = off`. `config/database.php`
+    defaults `sslmode` and `channel_binding` to `require`, and the URL's query is what overrides
+    those defaults; a non-TLS connection that insists on channel binding fails where the server
+    answers the authentication request, which reads as a broken server rather than as a bad setting.
+    A server that does speak TLS — the Debian package ships `ssl = on` with a self-signed certificate
+    — can keep `sslmode=require&channel_binding=require` instead, as long as the role's password is
+    stored as `scram-sha-256`, which has been `password_encryption`'s default since PostgreSQL 14. An
+    `md5` hash there means a channel-binding failure, not a bad password. Run
+    `php artisan config:clear` after the change if the config is ever cached.
+
+4.  **Migrate and seed**:
+
+    ```bash
+    php artisan migrate
+    php artisan db:seed
+    ```
+
+`php artisan serve --host=127.0.0.1 --port=7112` then answers on the local cluster, and
+`php artisan test` runs against it too — the suite rolls back rather than migrating, so it needs the
+same schema the board does. Switching back to Neon is one line in `.env` and a fresh
+`php artisan migrate`, which builds an empty board: the rows that live on the other server stay
+there.
 
 ### Three Postgres details worth knowing
 
@@ -93,33 +147,32 @@ headless server — `neon login` times out there. Take the string from the web c
 2. **`channel_binding` is not a Laravel connection key.** The stock `PostgresConnector` would drop
    it silently, leaving SCRAM channel binding off. `app/Database/Connectors/PostgresConnector.php`
    adds it to the DSN and is bound in `AppServiceProvider` under `db.connector.pgsql`.
-3. **`dont_drop` guards djbb-lite's tables.** `config/database.php` lists the 12 Django tables
-   under `dont_drop`, so `migrate:fresh` and `db:wipe` skip them instead of deleting someone
-   else's board. The current database has no Django tables at all, but neither command is ever the
-   right thing to run against a live board anyway.
+3. **`dont_drop` guards somebody else's tables.** `config/database.php` lists 12 tables belonging to
+   the board this project was ported from under `dont_drop`, so `migrate:fresh` and `db:wipe` skip
+   them instead of deleting a schema they do not own. The current database holds none of them, but
+   neither command is ever the right thing to run against a live board anyway.
 
 ## Setting up a database
+
+The connection string is either the pooled Neon endpoint of
+[1a](#1a-getting-the-db-url-from-the-neon-console) or a local cluster from
+[1b](#1b-setting-up-a-local-postgresql-database). Everything below runs the same on both.
 
 ```bash
 # 1. create the Laravel tables (users, sessions, posts, comments, cache, jobs, migrations)
 php artisan migrate
 
-# 2. bring in the existing Django rows, keeping primary keys
-php artisan board:import-django
-
-# 3. or, on an empty branch, seed the two test accounts
+# 2. then, on an empty database, the two test accounts
 php artisan db:seed
 ```
 
-`board:import-django` copies `auth_user` → `users`, `board_post` → `posts`,
-`board_comment` → `comments`, carries the Django primary keys over so `author_id` / `post_id`
-still line up, re-syncs the sequences with `setval`, and skips ids that already exist — so it is
-safe to re-run and never overwrites edits made in Laravel.
+`db:seed` skips an account whose username is already there, so re-running it on a board that has been
+used is a no-op rather than a second `admin`.
 
 ## Quick start
 
 ```bash
-cp .env.example .env      # set DATABASE_URL, then: php artisan key:generate
+cp .env.example .env      # set DATABASE_URL (1a or 1b), then: php artisan key:generate
 php artisan migrate
 php artisan serve --host=127.0.0.1 --port=7112
 ```
@@ -141,11 +194,10 @@ internet.
 
 ## Routes
 
-Paths and route names match djbb-lite; the POST twin of a GET route gets a `_store` suffix.
-Three paths have no Django equivalent, all because of how Laravel asks for the same behaviour:
-`/profile` and its POST (the board had no page for a user's own data), `POST /profile/password`
-(Django posts both profile forms to one URL and lets the button decide), and `/admin/users` (Django's
-contrib admin generates that page, this one is written).
+Route names follow their paths, and the POST twin of a GET route gets a `_store` suffix. Two shapes in
+the list are worth knowing: `/profile` splits the avatar (`POST /profile`) from the password
+(`POST /profile/password`), so a view never asks which button was pressed; and `/admin/users` is a
+page this app writes itself, because nothing here generates an admin for it.
 
 | Method     | Path                        | Name                  | Controller action     | Notes                    |
 | ---------- | --------------------------- | --------------------- | --------------------- | ------------------------ |
@@ -165,7 +217,7 @@ contrib admin generates that page, this one is written).
 | `POST`     | `/login`                    | `login_store`         | `@login`               |                          |
 | `GET`      | `/signup`                   | `signup`              | `@showSignup`          |                          |
 | `POST`     | `/signup`                   | `signup_store`        | `@signup`              | avatar required          |
-| `POST`     | `/logout`                   | `logout`              | `@logout`              | POST only, as in Django  |
+| `POST`     | `/logout`                   | `logout`              | `@logout`              | POST only                |
 | `GET`      | `/profile`                  | `profile`             | `ProfileController@show` | login required         |
 | `POST`     | `/profile`                  | `profile_store`       | `@update`              | login required           |
 | `POST`     | `/profile/password`         | `password_store`      | `@updatePassword`      | login required           |
@@ -177,9 +229,10 @@ contrib admin generates that page, this one is written).
 | `POST`     | `/admin/comment/{c}/delete` | `admin_comment_delete` | `@destroyComment`     | staff                    |
 | `GET`      | `/up`                       | —                     | framework health check |                          |
 
-Comments are POSTed to the post's own URL, as Django did (`post_detail` handled both verbs);
+Comments are POSTed to the post's own URL, so `@show` and `@storeComment` share one path;
 `/post/new` is declared before `/post/{post}` so the literal segment wins. `{post}` and `{comment}`
-are constrained with `whereNumber` to keep Django's `<int:pk>` matching.
+are constrained with `whereNumber` — an id is an integer or nothing, and `/post/abc` never reaches a
+controller.
 
 ## Permissions model
 
@@ -196,15 +249,21 @@ public function canBeManagedBy(?User $user): bool
 A user who fails the check is **redirected to the post rather than shown a 403**, so the edit and
 delete URLs do not leak which post IDs exist versus which are simply yours. `/admin` is the
 opposite case: `EnsureUserIsStaff` (aliased as `staff` in `bootstrap/app.php`) answers `403` to a
-logged-in non-staff user and redirects a guest to `/login` — the same as Django's admin. `/members`
-sits behind that same pair, and the footer figure that links to it is rendered as a link for staff
-alone. `POST /members/{member}/role`, which switches a writer between the two types, sits behind it
-too, with one refusal added: the row of the admin who is clicking answers `403` as well, because no
-path from that page may end the right to use it.
+logged-in non-staff user and redirects a guest to `/login`. `/members` sits behind that same pair, and
+the footer figure that links to it is rendered as a link for staff alone.
+`POST /members/{member}/role`, which switches a writer between the two types, sits behind it too, with
+one refusal added: the row of the admin who is clicking answers `403` as well, because no path from
+that page may end the right to use it.
 
-Django's `post_detail` accepted comment POSTs from anonymous visitors and relied on the template
-to hide the form; here `comment_store` sits behind the `auth` middleware, which is the same
-outcome without the trap.
+`comment_store` sits behind the `auth` middleware rather than trusting a template to keep the form
+away from a guest, so an anonymous POST to a post's URL is a redirect to `/login` and not a write.
+
+Two rules about names are worth stating. The login lookup is **case-sensitive**
+(`user` ≠ `USER`), while the signup check is **case-insensitive** — a name that differs from an
+existing one only in letter case is refused with "This username is already taken." And `users.email`
+carries no unique constraint: the initial migration added one by reflex, and
+`2026_10_21_010000_drop_email_unique_from_users_table` takes it back off, because two members sharing
+an address is a thing this board allows.
 
 ## The pages that came last
 
@@ -214,12 +273,12 @@ outcome without the trap.
 Every avatar on the board — post author and comment author, on the index and on a thread — is wrapped
 in a link to that page, which is why the view needs no query beyond the lookup itself:
 `User::where('username', $username)->firstOrFail()`. The e-mail line renders only when
-`$request->user()?->is_staff`, so a guest and a fellow writer see exactly what Django's
-`user_detail.html` shows them: a face and a name.
+`$request->user()?->is_staff`, so a guest and a fellow writer see the same thing on that page: a face
+and a name.
 
-Django's `<str:username>` needed no constraint and neither does `{username}` — the segment takes
-anything but a slash, and the check is a lookup rather than a route pattern. An unknown name answers
-the framework's 404; the board has no missing-member page, only a missing-*post* one.
+`{username}` carries no constraint, and none is needed — the segment takes anything but a slash, and
+the check is a lookup rather than a route pattern. An unknown name answers the framework's 404; the
+board has no missing-member page, only a missing-*post* one.
 
 ### Looking at profiles in the admin
 
@@ -228,26 +287,20 @@ username order, behind the same `staff` middleware as the rest of `/admin` — a
 writer gets `403`.
 
 `admin/users.blade.php` is a `<table>` with no form, no button and no anchor in it, so there is
-nothing to disable. Django had to work for the same result: `ProfileAdmin` refusing add, change and
-delete is what puts its change page into view mode, and every field then has to be listed in
-`readonly_fields` to appear at all, because the model only holds the avatar string while name and
-e-mail are methods reading through the one-to-one — with a `select_related` so the list does not fetch
-each user separately. Here avatar, name, e-mail and the staff flag all live on the `users` row, so one
-query reads the page and there is no relation to follow; the fourth column is the roll-call's own,
-reached through the same `User::withLastActivity()` scope, and it is still only a value to read.
+nothing to disable, and nothing to work at: avatar, name, e-mail and the staff flag all live on the
+`users` row, so one query reads the page. The fourth column is the roll-call's own, reached through
+the same `User::withLastActivity()` scope, and it is still only a value to read.
 
-What was not copied over is the search box: Django's `search_fields` covered two text fields, and this
-instance has five accounts. Nothing here is edited either — accounts are made by the seeder and
-`board:import-django`, `/profile` changes an avatar and a password, and the one thing an admin
-changes about somebody else is their type, which happens on the roll-call below. Django keeps its own
-user admin because it has one.
+There is no search box — two text fields across five accounts is not a list you can lose your place
+in. Nothing here is edited either: accounts are made by the seeder, `/profile` changes an avatar and a
+password, and the one thing an admin changes about somebody else is their type, which happens on the
+roll-call below.
 
 ### A roll-call of the board
 
 `/members` is the staff-only list of every writer — face, name, `admin` or `member`, and when they last
-did something here — with whoever did something most recently at the top. Django's `member_list`
-annotates `Coalesce(Greatest(Max, Max), F('date_joined'))`; the same expression here is a scope on the
-model, `User::withLastActivity()`, so the roll-call and `/admin/users` read one definition of it:
+did something here — with whoever did something most recently at the top. The ordering is one scope on
+the model, `User::withLastActivity()`, so the roll-call and `/admin/users` read one definition of it:
 
 ```php
 $query->select('users.*')
@@ -279,9 +332,8 @@ way in is the users figure in the footer, which `partials/stats.blade.php` wraps
 `auth()->user()?->is_staff` — the wording every other visitor reads is unchanged, character for
 character.
 
-One difference in the data is worth knowing: these columns are `timestamp(0)`, so two accounts created
-in the same second tie, and Postgres breaks the tie as it likes. Django's are microsecond and its
-order there is total.
+One property of the columns is worth knowing: they are `timestamp(0)`, so two accounts created in the
+same second tie, and Postgres breaks the tie as it likes.
 
 ### Switching a member's type
 
@@ -311,34 +363,30 @@ now shows the other word.
 
 ### Changing a password
 
-`/profile` holds two forms. Django posts both to one URL and reads the pressed button's name
-(`change_password`) to decide which of the two is bound; here each has its own endpoint —
-`POST /profile` for the avatar, `POST /profile/password` for the password — so a view never asks which
-button was pressed, a rejected password cannot paint errors over the picker next to it, and saving an
-avatar never has to know the current password.
+`/profile` holds two forms with two endpoints: `POST /profile` for the avatar,
+`POST /profile/password` for the password. A view never asks which button was pressed, so a rejected
+password cannot paint errors over the picker next to it, and saving an avatar never has to know the
+current password.
 
-`PasswordRequest` is the counterpart of `PasswordChangeForm`: `Hash::check` against the stored hash
-for `old_password`, `min:8` and `same:new_password1` for the pair, then an `after()` hook for the two
-checks Laravel has no rule for — all-numeric, and too similar to this account's own username or
-address. The messages are Django's own strings, including the typographic apostrophe.
+`PasswordRequest` does the whole check: `Hash::check` against the stored hash for `old_password`,
+`min:8` and `same:new_password1` for the pair, then an `after()` hook for the two checks Laravel has
+no rule for — all-numeric, and too similar to this account's own username or address. The messages are
+written out by hand, the typographic apostrophe in "didn’t match" included.
 
-The similarity check had to be written (`app/Validation/PasswordSimilarity.php`) because nothing in
-Laravel resembles `UserAttributeSimilarityValidator`: each attribute is split on non-word characters
-plus the whole value, a piece the password dwarfs is skipped (ten times its length, and under 35% of
-the password), and what is left is rejected at a common-character frequency of 0.7 or more.
+The similarity check had to be written (`app/Validation/PasswordSimilarity.php`), because nothing in
+Laravel does it: each attribute is split on non-word characters plus the whole value, a piece the
+password dwarfs is skipped (ten times its length, and under 35% of the password), and what is left is
+rejected at a common-character frequency of 0.7 or more.
 
-`CommonPasswordValidator` is the one Django check with no counterpart — Laravel ships no blocklist to
-consult, and copying Django's twenty thousand words into a toy board is a thing this repo should not
-grow. A password drawn from that list therefore passes here, which is why the field hint promises only
-what is enforced.
+There is no blocklist of known-leaked passwords to consult — Laravel ships none, and copying twenty
+thousand words of them into a toy board is a thing this repo should not grow. A password drawn from
+such a list therefore passes here, which is why the field hint promises only what is enforced.
 
 Two details of the write. `forceFill` is used so the `hashed` cast runs, which means the new password
-lands as bcrypt and finishes what the first login of an imported pbkdf2 string started. And nothing
-resembles `update_session_auth_hash`: Laravel's session row is keyed to the user's **id**, so a new
-hash does not invalidate the cookie that just arrived, whereas Django keys it to the password hash and
-would log out anyone who changed their own password without that call. The result is announced through
-`session('status')` — the flashed line `layouts/app.blade.php` renders as `.messages`, which is what
-`django.contrib.messages` became here.
+lands as bcrypt. And no session-refresh step is needed to stay signed in: the session row is keyed to
+the user's **id**, so a new hash does not invalidate the cookie that just arrived — an app that keyed
+the session to a digest of the password would log out anyone who changed it. The result is announced
+through `session('status')` — the flashed line `layouts/app.blade.php` renders as `.messages`.
 
 ### When a post is gone
 
@@ -351,14 +399,14 @@ sooner. `@section('head')` is a `@yield` the layout gained for exactly this, pla
 Two choices are worth knowing about. The controller **returns** that page with
 `response()->view('posts.missing', [], 404)` rather than throwing `NotFoundHttpException`, because with
 `APP_DEBUG=true` Laravel renders its own technical page over the exception handler on exactly the
-machine most likely to be running this repo — the same reason Django's `post_detail` returns instead of
-raising `Http404`. And the response still **carries status 404**: the redirect is a courtesy to the
-person reading the page, not a lie to the crawler, the monitoring check, or `curl`.
+machine most likely to be running this repo. And the response still **carries status 404**: the
+redirect is a courtesy to the person reading the page, not a lie to the crawler, the monitoring check
+or `curl`.
 
-Django got "a pk is an integer or nothing" free from `<int:pk>`. Here `show()` takes a string and calls
-`Post::find((int) $post)`, and PHP saturates an over-long digit string at `PHP_INT_MAX` — so
-`/post/99999999999999999999` is a missing post rather than a Postgres integer-out-of-range 500. That
-cast plus `whereNumber` is what keeps Django's matcher.
+`show()` takes the path segment as a string and calls `Post::find((int) $post)`, and PHP saturates an
+over-long digit string at `PHP_INT_MAX` — so `/post/99999999999999999999` is a missing post rather
+than a Postgres integer-out-of-range 500. That cast plus `whereNumber` is what makes an id an integer
+or nothing.
 
 ### The three footer numbers
 
@@ -373,43 +421,9 @@ compiles `@extends` into a `make()` on the layout, so a composer on the layout f
 that extends it. The one trap is that a class-based composer is invoked as `compose()`, not `handle()`
 — name it `handle` and every page in the layout 500s.
 
-`partials/stats.blade.php` does the wording, with `Str::plural($word, $count)` where Django's template
-had `|pluralize`. They are counted on every request rather than cached: three indexed `COUNT`s over
-tables this small are cheaper than a cache that can report a member who has since left.
-
-## Living with the Django app
-
-The port was written to share one schema with djbb-lite, each app with its own tables. The database
-it runs against now (a fresh Neon project since 2026-10-21) holds only the Laravel tables, so the
-importer stands down until it is pointed at a database where the Django tables live.
-
-- **Passwords.** Imported rows carry `pbkdf2_sha256$iterations$salt$base64` verbatim.
-  `app/Hashing/DjangoHasher.php` is registered as the `django` hash driver (`config/hashing.php`
-  defaults to it) and extends `BcryptHasher`: it verifies a Django string with `hash_pbkdf2` +
-  `hash_equals`, reports `needsRehash()` for it, and lets `verifyConfiguration()` pass it through
-  the Eloquent `hashed` cast instead of double-hashing it. The first successful login replaces it
-  with bcrypt.
-  That upgrade is invisible to Django as long as `bcrypt` is installed and `BCryptSHA256PasswordHasher`
-  stays in `PASSWORD_HASHERS` (it is the default first entry) — Django will simply re-hash it back
-  on the next login. Accounts that never log in keep their pbkdf2 string.
-- **Login is case-sensitive** (`user` ≠ `USER`), matching Django's `get_by_natural_key`. Signup is
-  **case-insensitive**: a name that differs only in letter case from an existing one is rejected
-  with "This username is already taken.", like `UserCreationForm`.
-- **E-mails are not unique**, because Django never enforced that. The initial migration added the
-  constraint by reflex; `2026_10_21_010000_drop_email_unique_from_users_table` takes it back off.
-- **Timestamps lose sub-second precision.** Laravel's `timestamp()` columns are `timestamp(0)`
-  while Django's are `timestamptz(6)`. Nothing in either UI shows more than minutes, but imported
-  rows can differ by up to one second.
-- `users` has no `name`, `email_verified_at`, or `password_reset_tokens` column — the port does not
-  use them, and there is no password reset in either app.
-- **`users.avatar` is Laravel-only.** `auth_user` has no avatar field, so `board:import-django`
-  derives one from the primary key (`User::presetForId()`, the same `id % 4` rotation the migration
-  used). Django keeps reading `auth_user` untouched; the two apps never write the same column.
-- **Member pages therefore show different pictures.** Django's `/user/<name>/` reads the avatar from
-  `board.Profile`, this app's `/user/{username}` from `users.avatar`. A Django user who uploaded a
-  picture sees it there and the preset derived from their id here — `board:import-django` skips ids
-  that already exist, so it never carries an upload across. Username and e-mail agree, since both come
-  from the same rows.
+`partials/stats.blade.php` does the wording, with `Str::plural($word, $count)` keeping the panel honest
+about one and about many. They are counted on every request rather than cached: three indexed `COUNT`s
+over tables this small are cheaper than a cache that can report a member who has since left.
 
 ## Project layout
 
@@ -427,7 +441,7 @@ importer stands down until it is pointed at a database where the Django tables l
 │   │                         # PasswordRequest, and Concerns/GathersAvatar, the shared avatar rules
 │   ├── Models/               # Post, Comment, User
 │   ├── Services/             # AvatarResizer (GD crop + resample), AvatarStore (write + cleanup)
-│   ├── Validation/PasswordSimilarity.php  # Django's UserAttributeSimilarityValidator
+│   ├── Validation/PasswordSimilarity.php  # the similarity rule inside PasswordRequest
 │   └── View/Composers/BoardCounts.php     # the three footer numbers, on every page
 ├── bootstrap/app.php         # routing, staff alias, JSON exception rules
 ├── config/
@@ -453,24 +467,29 @@ importer stands down until it is pointed at a database where the Django tables l
                               # the type switch
 ```
 
-`Post` and `Comment` set `const UPDATED_AT = null` (Django had only `created_at`), `comments()`
+`Post` and `Comment` set `const UPDATED_AT = null` and carry `created_at` alone, `comments()`
 orders by `created_at`, and `password` / `remember_token` stay hidden on the `User` model. `is_staff`
 stays out of `#[Fillable]` for the same reason it stays out of a form: nothing a visitor posts may make
 them staff, so the role switch writes it with `forceFill` after its own staff check.
 
+Three things about the `users` columns are worth naming. There is no `name`, `email_verified_at`, or
+`password_reset_tokens` — the board has no use for them and there is no password reset here. `avatar`
+is `NOT NULL` and holds exactly two shapes: one of the four preset basenames, or
+`uploads/{id}.{jpeg,png,webp}`. And `User::presetForId()` — `id % 4` over the four presets — rotates a
+row onto a picture by primary key, which the backfill in `2026_10_22_000000_add_avatar_to_users_table`
+spells the same way in SQL: change one, change the other.
+
 ## Tests
 
 ```bash
-php artisan test        # 104 feature tests, 2 of which skip without the Django tables
+php artisan test        # 104 feature tests
 vendor/bin/pint --test  # style
 ```
 
 `tests/TestCase.php` applies `DatabaseTransactions`, so each test rolls back. **Never use
-`RefreshDatabase` in this project** — the suite runs against the same Neon database as the live
-board, so migrating or wiping would destroy real data. The two `ImportDjangoDataTest` cases skip
-themselves when `auth_user` is absent, which is the state of the current database. The
-`phpunit.xml` env block keeps sessions, cache and mail in-memory; the database connection still
-comes from `.env`.
+`RefreshDatabase` in this project** — the suite runs against the same database as the live board, so
+migrating or wiping would destroy real data. The `phpunit.xml` env block keeps sessions, cache and mail
+in-memory; the database connection still comes from `.env`.
 
 ## Production notes
 
@@ -478,8 +497,8 @@ Nothing here is production-shaped, on purpose: `APP_DEBUG=true`, the `log` maile
 accounts, and `artisan serve` — a development server, which here listens on `0.0.0.0:7112` so another
 machine can look at the board. The things that would actually bite:
 
-- Set `APP_KEY` freshly (`php artisan key:generate`); the key that shipped in djbb-lite's repo is
-  public and is reused here only because this is the same toy instance.
+- Set `APP_KEY` freshly (`php artisan key:generate`); a key that has ever sat in a published repo is
+  a public key, whatever the file says about it.
 - Put a real server in front (`php artisan serve` is a development tool), keep `sslmode=require`
   and `channel_binding=require` in the connection string, and re-check `SESSION_COOKIE_SECURE` /
   `APP_URL` behind TLS.
@@ -492,12 +511,11 @@ machine can look at the board. The things that would actually bite:
 
 - Pagination, edit history, nested replies, markdown, attachments. The avatar upload is the one file
   the board accepts, and it is resized to 100x100 rather than stored as sent.
-- Password reset / e-mail verification (djbb-lite never had them either).
-- Django's common-password blocklist. `CommonPasswordValidator` consults a file of about twenty
-  thousand leaked passwords; `PasswordRequest` checks length, all-digits and similarity to the
-  account's own username or address, and nothing else. It is the only one of Django's four validators
-  with no counterpart here.
-- A search box on `/admin/users`. Django had one over two text fields; this instance has five accounts.
+- Password reset and e-mail verification.
+- A blocklist of known-leaked passwords. Laravel ships none, and copying a file of about twenty
+  thousand of them into a toy board is a thing this repo should not grow; `PasswordRequest` checks
+  length, all-digits and similarity to the account's own username or address, and nothing else.
+- A search box on `/admin/users`. Five accounts do not need one.
 - Rate limiting or any spam control on comments.
 - Front-end build tooling — `package.json` and Vite are gone; there is nothing to compile.
 

@@ -1,17 +1,17 @@
 # lvbb-lite
 
-A Laravel 13 port of `../djbb-lite` (Django). Small bulletin board: three models, five
-controllers, Blade views with inline CSS. No starter kit, no Node build step, no Tailwind.
+A Laravel 13 bulletin board. Small: three models, five controllers, Blade views with inline CSS. No
+starter kit, no Node build step, no Tailwind.
 
 ## Non-negotiables
 
 - **Postgres only.** `config/database.php` defines exactly one connection (`pgsql`) and throws at
   boot without a `DATABASE_URL`. Never reintroduce SQLite, and never add a `DB_CONNECTION` switch.
 - **This database holds live board data.** Never run `migrate:fresh`, `migrate:reset`, or
-  `db:wipe`. Since 2026-10-21 the connection points at a Neon project carrying only Laravel's
-  tables — djbb-lite stayed on the instance that was replaced — so `board:import-django` reports the
-  Django tables missing and `ImportDjangoDataTest` skips itself. The 12 tables stay listed under
-  `dont_drop` as a backstop for any database where they do coexist.
+  `db:wipe`. Since 2026-10-21 the connection points at a Neon project carrying only this app's
+  tables — `board:import-django` reports the legacy tables missing and `ImportDjangoDataTest` skips
+  itself. The 12 tables stay listed under `dont_drop` as a backstop for any database where they do
+  coexist, including a local cluster set up per README §1b, which starts with only these tables too.
 - **Tests roll back, they do not migrate.** `tests/TestCase.php` uses `DatabaseTransactions`.
   Do not switch it to `RefreshDatabase`.
 - **Feature tests must survive a populated database.** They run against the live board, so never assert
@@ -23,7 +23,11 @@ controllers, Blade views with inline CSS. No starter kit, no Node build step, no
   transaction fails with `SQLSTATE[25P02]` and migrations break.
 - **`DATABASE_URL` lives in `.env`, and `.env.local` must not exist.** Laravel loads
   `.env.{APP_ENV}` *instead of* `.env`, and `artisan serve` inherits `APP_ENV=local`, so a
-  `.env.local` copied from djbb-lite hides `APP_KEY` and every request 500s.
+  `.env.local` hides `APP_KEY` and every request 500s.
+- **`sslmode` and `channel_binding` default to `require`** in `config/database.php`, and the URL's
+  query string is the only thing that overrides them. A local cluster with `ssl = off` therefore
+  needs `?sslmode=disable&channel_binding=disable` written out, or the connection dies on the
+  authentication exchange and reads as a broken server. See README §1b.
 - **`users.avatar` is `NOT NULL` and holds only two shapes** — one of the four preset basenames in
   `User::AVATAR_PRESETS`, or `uploads/{id}.{jpeg,png,webp}`. Anything else must be rejected at the
   form; `User::AVATAR_UPLOAD` is what gates deletion, so a stored value can never name a preset, a
@@ -40,40 +44,42 @@ controllers, Blade views with inline CSS. No starter kit, no Node build step, no
 
 - `app/Database/Connectors/PostgresConnector.php` — adds `channel_binding` to the DSN; bound as
   `db.connector.pgsql` in `AppServiceProvider::register()`.
-- `app/Hashing/DjangoHasher.php` + `config/hashing.php` — verifies Django's `pbkdf2_sha256$…`
-  strings imported from `auth_user`, reports them as rehashable, and lets the Eloquent `hashed`
-  cast pass them through. First successful login upgrades to bcrypt.
+- `app/Hashing/DjangoHasher.php` + `config/hashing.php` — the `django` hash driver, registered as the
+  default: it verifies `pbkdf2_sha256$iterations$salt$base64` strings on a row that arrived from the
+  old board, reports them as rehashable, and lets the Eloquent `hashed` cast pass them through
+  instead of double-hashing them. First successful login upgrades the row to bcrypt.
 - `app/Console/Commands/ImportDjangoData.php` (`php artisan board:import-django`) — copies users,
-  posts and comments from the Django tables, keeping primary keys; idempotent. `copyRows()` takes a
-  `$computed` map for columns Django does not have (`users.avatar`).
+  posts and comments out of the old board's tables (`auth_user`, `board_post`, `board_comment`),
+  keeping primary keys; idempotent. `copyRows()` takes a `$computed` map for columns that schema does
+  not have (`users.avatar`).
 - `app/Services/AvatarResizer.php` — hand-rolled GD, no image package: centre-crop to a square,
   resample to 100x100, re-encode as the source type. `imagealphablending(false)` plus
   `imagesavealpha(true)` on the destination is what keeps PNG transparency.
 - `app/Services/AvatarStore.php` — writes through `Storage::disk('avatars')` (`config/filesystems.php`,
   rooted at `public/avatars`, no `storage:link`) and removes the file the row stopped pointing at.
   Handles must stay disk-relative: Flysystem prefixes an absolute path onto the disk root.
-- `app/Validation/PasswordSimilarity.php` — Django's `UserAttributeSimilarityValidator`, arithmetic and
-  all: each of `username` and `email` split on non-word characters plus the whole value, a piece the
-  password dwarfs ignored, the rest rejected at a common-character frequency of 0.7 or more. Do not
-  simplify it to `str_contains` — that rejects passwords Django accepts.
-- `app/Http/Requests/PasswordRequest.php` — three of Django's four password validators, the messages
-  verbatim. `CommonPasswordValidator` is deliberately unported (no blocklist in Laravel, none to add);
-  `min:8`, `ctype_digit` and the similarity check are what the form enforces and the page hint says no
-  more than that.
-- `resources/views/` renders the same URLs and wording as the Django templates. Keep error strings
-  verbatim ("This username is already taken.", "Wrong username or password.").
+- `app/Validation/PasswordSimilarity.php` — the similarity rule `PasswordRequest` needs, arithmetic
+  and all: each of `username` and `email` split on non-word characters plus the whole value, a piece
+  the password dwarfs ignored, the rest rejected at a common-character frequency of 0.7 or more. Do
+  not simplify it to `str_contains` — that rejects passwords the form is meant to accept.
+- `app/Http/Requests/PasswordRequest.php` — three checks and nothing more: `min:8`, `ctype_digit`
+  and the similarity rule, with hand-written messages. A blocklist of known-leaked passwords is
+  deliberately absent (Laravel ships none, and none is to be added here); the page hint says no
+  more than what the form enforces.
+- `resources/views/` carries the board's own wording. Keep error strings exactly as they stand
+  ("This username is already taken.", "Wrong username or password.") — the tests assert the field
+  names, not the text, so a reworded message breaks nothing but the voice.
 
 ## Behaviour to preserve
 
 - `Post::canBeManagedBy()` is the only permission rule. Failing it **redirects** to the post
   instead of returning 403; `/admin` does return 403 to non-staff (`staff` middleware alias).
 - Login lookup is case-sensitive, signup username check is case-insensitive, e-mails are not
-  unique — all three match Django.
-- Route paths and names mirror `../djbb-lite/config/urls.py`; `/post/new` is declared before
-  `/post/{post}`, and comments POST to the post's own URL. Three paths have no Django counterpart:
-  `/profile` and its POST, `POST /profile/password` (Django posts both profile forms to one URL and
-  reads the pressed button; separate routes do the same job without that step), and `GET /admin/users`
-  (Django's contrib admin generates it). `/user/{username}` and `/members` match Django again.
+  unique. All three are deliberate — leave them.
+- Route paths and names live in `routes/web.php`: `/post/new` is declared before
+  `/post/{post}`, and comments POST to the post's own URL. `POST /profile` and
+  `POST /profile/password` stay separate — one URL for both would mean reading which button was
+  pressed, and that is how a rejected password ends up painting errors over the avatar picker.
 - `PostController::show` **returns** `posts/missing` with status 404 instead of `findOrFail`.
   `APP_DEBUG=true` makes Laravel answer a `NotFoundHttpException` with its own technical page, which is
   the page the board is trying not to show, and a 200 would be a lie to `curl`. Keep the `(int)` cast:
@@ -84,7 +90,7 @@ controllers, Blade views with inline CSS. No starter kit, no Node build step, no
   link there from the index and from a thread; that is the only place a board reader can reach a
   profile that is not their own.
 - `GET /members` is the staff roll-call, gated by `['auth', 'staff']`: a guest goes to the login page
-  and a logged-in writer gets 403. `User::withLastActivity()` keeps Django's
+  and a logged-in writer gets 403. `User::withLastActivity()` is the only place that computes
   `COALESCE(GREATEST(MAX, MAX), MAX(users.created_at))` — the join date sits in the `COALESCE`, not
   inside `GREATEST`, or an account created after its own posts is placed by its signup and activity
   stops deciding the order. `select('users.*')` next to `groupBy('users.id')` is what lets the
@@ -102,22 +108,22 @@ controllers, Blade views with inline CSS. No starter kit, no Node build step, no
   binding an empty model and the `save()` becomes an INSERT. The write stays out of the `admin`
   prefix: `/admin/users` must keep the no-form, no-button, no-anchor shape its tests assert.
 - A password change writes through `forceFill` so the `hashed` cast runs and the result is bcrypt, and
-  needs no `update_session_auth_hash` equivalent: Laravel's session holds the user's id, not a digest
-  of the hash. Do not add one, and do not merge the two `/profile` POSTs.
+  needs nothing to keep the visitor signed in: Laravel's session holds the user's id, not a digest of
+  the hash. Do not add a session-refresh step, and do not merge the two `/profile` POSTs.
 - An avatar is mandatory but never forced twice: signup requires a preset pick, `/profile` accepts an
   empty submission and keeps whatever is stored, because the whitelist only names presets and an
   uploaded avatar would otherwise be impossible to keep.
 - `User::presetForId()` (`id % 4` over the four presets) is used by the backfill in
   `2026_10_22_000000_add_avatar_to_users_table`, whose SQL spells the same rotation, and by
-  `board:import-django`. Change one and the other two have to move with it.
+  `ImportDjangoData`. Change one and the other two have to move with it.
 
 ## Commands
 
 ```bash
 php artisan serve --host=127.0.0.1 --port=7112   # dev server (0.0.0.0 to answer on every interface)
-php artisan test                                 # 104 feature tests against Neon
+php artisan test                                 # 104 feature tests, against the configured database
 vendor/bin/pint                                  # fix style (pint --test to check)
-php artisan migrate                              # apply Laravel migrations
+php artisan migrate                              # apply the migrations to Neon or to a local cluster
 ```
 
 Requires PHP 8.3+ with `pdo_pgsql` (`php -m | grep pgsql`) and `gd` for the avatar resize
