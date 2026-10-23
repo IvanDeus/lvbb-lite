@@ -34,10 +34,11 @@ class PostController extends Controller
             return response()->view('posts.missing', [], 404);
         }
 
-        $found->load(['author', 'comments.author']);
+        $found->load('author');
 
         return view('posts.show', [
             'post' => $found,
+            'comments' => Comment::paginateWithin($found->comments()->with('author'), $request->integer('page')),
             'canManage' => $found->canBeManagedBy($request->user()),
         ]);
     }
@@ -49,7 +50,12 @@ class PostController extends Controller
         $comment->author()->associate($request->user());
         $comment->save();
 
-        return redirect()->route('post_detail', $post);
+        // A reply is the newest row in the thread, so it lives on the last page. Sending the writer
+        // back to the first would leave them reading replies they had already read. `page` stays out
+        // of the URL until there is a second page to ask for.
+        $lastPage = Comment::lastPage($post->comments()->count());
+
+        return redirect()->route('post_detail', $lastPage > 1 ? ['post' => $post, 'page' => $lastPage] : $post);
     }
 
     public function create(): View

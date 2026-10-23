@@ -22,6 +22,8 @@
     .body { white-space: pre-wrap; margin: 0 0 .5rem; }
     .field { display: block; width: 100%; box-sizing: border-box; font: inherit; padding: .5rem; margin: .35rem 0 .75rem; }
     .actions { display: flex; gap: .75rem; align-items: center; margin-top: .5rem; }
+    .pager { display: flex; gap: .75rem; align-items: center; font-size: .85rem; margin: .75rem 0; }
+    .pager-off { opacity: .5; }
     .errorlist { color: #c00; margin: 0 0 .5rem; }
     .messages { border: 1px solid rgba(128,128,128,.4); border-radius: .5rem; padding: .5rem .75rem; font-size: .9rem; margin: 0 0 1rem; }
     table { border-collapse: collapse; width: 100%; }

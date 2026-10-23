@@ -13,10 +13,10 @@
     <a href="{{ route('admin_posts') }}">back to posts</a>
   </div>
 
-  <h3>Comments ({{ $post->comments->count() }})</h3>
+  <h3>Comments ({{ $comments->total() }})</h3>
   <table>
     <tr><th>Author</th><th>Body</th><th>Created</th><th></th></tr>
-    @forelse ($post->comments as $comment)
+    @forelse ($comments as $comment)
       <tr>
         <td><img class="avatar" src="{{ $comment->author->avatarUrl() }}" alt="" width="24" height="24">{{ $comment->author->username }}</td>
         <td>{{ Str::limit($comment->body, 60, '…') }}</td>
@@ -32,4 +32,6 @@
       <tr><td colspan="4">No comments.</td></tr>
     @endforelse
   </table>
+
+  @include('partials.pager', ['comments' => $comments, 'link' => fn (int $page) => route('admin_post', ['post' => $post, 'page' => $page])])
 @endsection

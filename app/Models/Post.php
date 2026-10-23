@@ -20,9 +20,14 @@ class Post extends Model
         return $this->belongsTo(User::class);
     }
 
+    /**
+     * Oldest reply first, and `id` breaks a tie: `Comment` has no `updated_at`, so two replies stamped
+     * the same microsecond are otherwise in whatever order Postgres feels like handing them back —
+     * which is enough to move a row across a page boundary between two views of the same thread.
+     */
     public function comments(): HasMany
     {
-        return $this->hasMany(Comment::class)->orderBy('created_at');
+        return $this->hasMany(Comment::class)->orderBy('created_at')->orderBy('id');
     }
 
     public function canBeManagedBy(?User $user): bool

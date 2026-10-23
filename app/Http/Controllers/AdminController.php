@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Comment;
 use App\Models\Post;
 use App\Models\User;
+use Illuminate\Http\Request;
 use Illuminate\View\View;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 
@@ -29,16 +30,23 @@ class AdminController extends Controller
         return view('admin.users', ['users' => User::query()->withLastActivity()->orderBy('username')->get()]);
     }
 
-    public function post(Post $post): View
+    public function post(Request $request, Post $post): View
     {
-        return view('admin.post', ['post' => $post->load(['author', 'comments.author'])]);
+        return view('admin.post', [
+            'post' => $post->load('author'),
+            'comments' => Comment::paginateWithin($post->comments()->with('author'), $request->integer('page')),
+        ]);
     }
 
-    public function comments(): View
+    /**
+     * Ten to a page, oldest first — the same rule the thread reads, so the two lists cannot disagree
+     * about which reply came before which.
+     */
+    public function comments(Request $request): View
     {
-        return view('admin.comments', [
-            'comments' => Comment::with(['post', 'author'])->latest('created_at')->get(),
-        ]);
+        $comments = Comment::with(['post', 'author'])->oldest('created_at')->orderBy('id');
+
+        return view('admin.comments', ['comments' => Comment::paginateWithin($comments, $request->integer('page'))]);
     }
 
     public function destroyPost(Post $post): RedirectResponse

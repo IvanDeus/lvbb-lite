@@ -24,4 +24,6 @@
       <tr><td colspan="4">No comments.</td></tr>
     @endforelse
   </table>
+
+  @include('partials.pager', ['comments' => $comments, 'link' => fn (int $page) => route('admin_comments', ['page' => $page])])
 @endsection

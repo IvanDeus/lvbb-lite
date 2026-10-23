@@ -16,7 +16,7 @@
   </article>
 
   <h3>Comments</h3>
-  @forelse ($post->comments as $comment)
+  @forelse ($comments as $comment)
     <div class="comment">
       <p class="meta"><a href="{{ route('user_detail', $comment->author->username) }}"><img class="avatar" src="{{ $comment->author->avatarUrl() }}" alt="" width="24" height="24">{{ $comment->author->username }}</a> &middot; {{ $comment->created_at->format('Y-m-d H:i') }}</p>
       <p class="body">{{ $comment->body }}</p>
@@ -24,6 +24,8 @@
   @empty
     <p>No comments yet.</p>
   @endforelse
+
+  @include('partials.pager', ['comments' => $comments, 'link' => fn (int $page) => route('post_detail', ['post' => $post, 'page' => $page])])
 
   @auth
     <form method="post" action="{{ route('comment_store', $post) }}">

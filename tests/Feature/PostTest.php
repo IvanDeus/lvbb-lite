@@ -140,4 +140,110 @@ class PostTest extends TestCase
         $this->assertSame($user->id, $comment->author_id);
         $this->get("/post/{$post->id}")->assertOk()->assertSee('First!');
     }
+
+    public function test_a_thread_shows_ten_replies_and_oldest_come_first(): void
+    {
+        $post = Post::factory()->create();
+        $replies = $this->replies($post);
+
+        $this->get("/post/{$post->id}")
+            ->assertOk()
+            ->assertViewHas('comments', function ($comments) use ($replies) {
+                return $comments->perPage() === 10
+                    && $comments->count() === 10
+                    && $comments->total() === count($replies)
+                    && $comments->first()->is($replies[0])
+                    && $comments->last()->is($replies[9]);
+            })
+            ->assertSee($replies[0]->body)
+            ->assertSee($replies[9]->body)
+            ->assertDontSee($replies[10]->body)
+            ->assertSee('page 1 of 2', false)
+            ->assertSee('href="'.route('post_detail', ['post' => $post, 'page' => 2]).'"', false);
+
+        $this->get("/post/{$post->id}?page=2")
+            ->assertOk()
+            ->assertViewHas('comments', fn ($comments) => $comments->count() === 2 && $comments->first()->is($replies[10]))
+            ->assertSee($replies[10]->body)
+            ->assertSee($replies[11]->body)
+            ->assertDontSee($replies[0]->body)
+            ->assertSee('page 2 of 2', false)
+            ->assertDontSee('page=3', false);
+    }
+
+    public function test_a_thread_of_ten_prints_no_pager(): void
+    {
+        $post = Post::factory()->create();
+        $replies = $this->replies($post, 10);
+
+        $this->get("/post/{$post->id}")
+            ->assertOk()
+            ->assertViewHas('comments', fn ($comments) => $comments->count() === 10 && ! $comments->hasPages())
+            ->assertDontSee('class="pager"', false);
+    }
+
+    public function test_a_reply_lands_on_the_page_that_holds_it(): void
+    {
+        $post = Post::factory()->create();
+        $this->replies($post, 10);
+
+        $this->actingAs(User::factory()->create())
+            ->post("/post/{$post->id}", ['body' => 'the eleventh'])
+            ->assertRedirect("/post/{$post->id}?page=2");
+
+        $this->get("/post/{$post->id}?page=2")->assertOk()->assertSee('the eleventh');
+    }
+
+    public function test_a_page_past_the_end_shows_the_last_one(): void
+    {
+        $post = Post::factory()->create();
+        $replies = $this->replies($post);
+
+        // Nothing on this page has no replies, so it never says it has none.
+        $this->get("/post/{$post->id}?page=99")
+            ->assertOk()
+            ->assertViewHas('comments', fn ($comments) => $comments->currentPage() === 2 && $comments->lastPage() === 2)
+            ->assertSee('page 2 of 2', false)
+            ->assertSee($replies[11]->body)
+            ->assertDontSee('No comments yet.', false);
+    }
+
+    public function test_the_pager_reaches_the_first_and_the_last_page(): void
+    {
+        $post = Post::factory()->create();
+        $this->replies($post, 25);
+
+        $this->get("/post/{$post->id}?page=2")
+            ->assertOk()
+            ->assertViewHas('comments', fn ($comments) => $comments->currentPage() === 2 && $comments->lastPage() === 3)
+            ->assertSee('href="'.route('post_detail', ['post' => $post, 'page' => 1]).'" title="first page"', false)
+            ->assertSee('href="'.route('post_detail', ['post' => $post, 'page' => 3]).'" title="last page"', false);
+
+        // Standing on the last page, so the jump to it is a word rather than a link back to here.
+        $this->get("/post/{$post->id}?page=3")
+            ->assertOk()
+            ->assertDontSee('page=3', false)
+            ->assertSee('href="'.route('post_detail', ['post' => $post, 'page' => 1]).'" title="first page"', false);
+    }
+
+    /**
+     * Replies on one topic, a minute apart and numbered from the oldest. The stamps are fixed rather
+     * than left to insert order because the order is the thing under test, and the zero padding keeps
+     * `reply 01` from being a needle that `reply 1` could also match.
+     *
+     * @return array<int, Comment>
+     */
+    private function replies(Post $post, int $count = 12): array
+    {
+        $replies = [];
+
+        for ($i = 1; $i <= $count; $i++) {
+            $replies[] = Comment::factory()->for($post, 'post')->create([
+                'body' => 'reply '.str_pad((string) $i, 2, '0', STR_PAD_LEFT),
+                'created_at' => now()->subHours(2)->addMinutes($i),
+            ]);
+        }
+
+        return $replies;
+    }
 }

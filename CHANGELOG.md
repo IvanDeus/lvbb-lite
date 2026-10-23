@@ -11,6 +11,30 @@ First release: the whole application is a port of `djbb-lite` (Django 6.1) to La
 
 ### Added
 
+- **Ten replies to a page** — every comment list is now a page of ten, oldest first: the thread at
+  `/post/{post}`, the roll-call at `/admin/comments`, and the table inside `/admin/post/{post}`.
+  `Comment::PER_PAGE` holds the number and `Comment::paginateWithin()` is the one way to ask for a page
+  of it, which clamps the requested number *before* the query runs — `hasPages()` treats any page past
+  the first as pages to show, so `?page=99` on a three-reply thread would otherwise answer an empty list
+  under the words "No comments yet." and a label reading "page 99 of 2". `Post::comments()` gained the
+  `id` beside its `created_at` ordering: a comment has no `updated_at`, so a pair stamped in the same
+  instant would otherwise move across a page boundary between two looks, and `/admin/comments` reads
+  `oldest('created_at')` now instead of `latest()` so the two lists cannot disagree about which reply came
+  first. `partials/pager.blade.php` is written here rather than published from the framework and is handed
+  a closure that builds the link: `->links()` renders a Tailwind view and this board has no Tailwind, and
+  the paginator's own `url()` makes an absolute address out of whatever host the request arrived on — which
+  is also why the tests read `route(...)` for their needles. The pager is four ends around one figure —
+  `«` to the first page, `‹ previous`, the `page X of Y` count, `next ›`, and `»` to the last — and the
+  end with nowhere to go prints as a dimmed word rather than a link back to the page already on screen,
+  which is what `«` on the first page and `»` on the last become. The heading on `/admin/post/{post}` prints
+  `$comments->total()`, since `$post->comments->count()` would report the ten rows on the page rather than
+  the thread. A reply redirects to the page that holds it, so its author is not sent back to what they had
+  already read, and `page` stays out of the URL while one page is all there is. `withCount('comments')` is
+  untouched by the ordering: the count subquery drops the relation's orders before it runs. The one
+  existing test that reads `/admin/comments` now stamps its reply two hundred years back, because a reply
+  dated today sits on the *last* page of an oldest-first list — a needle for it holds only while the board
+  keeps ten replies or fewer, which this database did until it didn't.
+
 - **The last action is printed, and a type can be switched** — the roll-call gained a `Last action`
   column showing the timestamp it had always sorted by, and an action column: every row but the
   visitor's own ends in a `make admin` / `make member` button posting to

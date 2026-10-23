@@ -8,7 +8,8 @@ A deliberately small bulletin board built with Laravel. No starter kit, no Boots
 
 - **Posts** — title + body, newest first, with the index excerpting the body to 240 characters, the
   ellipsis counted.
-- **Comments** — listed under each post, created by logged-in users.
+- **Comments** — ten to a page under each post, oldest first, created by logged-in users. A reply sends
+  its author to the page that holds it.
 - **Author-only editing** — you can edit or delete your own posts.
 - **Staff override** — staff users can edit or delete *anyone's* post.
 - **`/admin`** — a hand-rolled list of posts and comments with delete buttons, staff only.
@@ -202,7 +203,7 @@ page this app writes itself, because nothing here generates an admin for it.
 | Method     | Path                        | Name                  | Controller action     | Notes                    |
 | ---------- | --------------------------- | --------------------- | --------------------- | ------------------------ |
 | `GET`      | `/`                         | `post_list`           | `PostController@index` | public                   |
-| `GET`      | `/post/{post}`              | `post_detail`         | `@show`                | public, own 404 page     |
+| `GET`      | `/post/{post}`              | `post_detail`         | `@show`                | public, own 404 page, ten replies a page |
 | `POST`     | `/post/{post}`              | `comment_store`       | `@storeComment`        | login required           |
 | `GET`      | `/post/new`                 | `post_create`         | `@create`              | login required           |
 | `POST`     | `/post/new`                 | `post_store`          | `@store`               | login required           |
@@ -222,9 +223,9 @@ page this app writes itself, because nothing here generates an admin for it.
 | `POST`     | `/profile`                  | `profile_store`       | `@update`              | login required           |
 | `POST`     | `/profile/password`         | `password_store`      | `@updatePassword`      | login required           |
 | `GET`      | `/admin`                    | `admin_posts`         | `AdminController@posts` | staff                  |
-| `GET`      | `/admin/comments`           | `admin_comments`      | `@comments`            | staff                    |
+| `GET`      | `/admin/comments`           | `admin_comments`      | `@comments`            | staff, ten a page        |
 | `GET`      | `/admin/users`              | `admin_users`         | `@users`               | staff, read-only         |
-| `GET`      | `/admin/post/{post}`        | `admin_post`          | `@post`                | staff                    |
+| `GET`      | `/admin/post/{post}`        | `admin_post`          | `@post`                | staff, ten replies a page |
 | `POST`     | `/admin/post/{post}/delete` | `admin_post_delete`   | `@destroyPost`         | staff                    |
 | `POST`     | `/admin/comment/{c}/delete` | `admin_comment_delete` | `@destroyComment`     | staff                    |
 | `GET`      | `/up`                       | —                     | framework health check |                          |
@@ -232,7 +233,8 @@ page this app writes itself, because nothing here generates an admin for it.
 Comments are POSTed to the post's own URL, so `@show` and `@storeComment` share one path;
 `/post/new` is declared before `/post/{post}` so the literal segment wins. `{post}` and `{comment}`
 are constrained with `whereNumber` — an id is an integer or nothing, and `/post/abc` never reaches a
-controller.
+controller. The three comment lists answer ten to a page through a `?page=` query, clamped to the pages
+that exist; nothing else on the board is paged.
 
 ## Permissions model
 
@@ -425,6 +427,26 @@ that extends it. The one trap is that a class-based composer is invoked as `comp
 about one and about many. They are counted on every request rather than cached: three indexed `COUNT`s
 over tables this small are cheaper than a cache that can report a member who has since left.
 
+### Ten replies to a page
+
+A thread shows ten comments at a time, oldest first, and so do the two staff lists. `Comment::PER_PAGE`
+is the number, and `Comment::paginateWithin()` is the only way to ask for a page of it. Asking first is
+what lets the page number be clamped *before* the query runs: `?page=99` on a three-reply thread answers
+the last real page rather than an empty list under the words "No comments yet." — the same reasoning that
+gives a missing post a page of its own instead of a framework error. `Post::comments()` orders by
+`created_at` and then by `id`, because a comment has no `updated_at`: two replies stamped the same
+instant would otherwise drift across a page boundary between one look and the next.
+
+`partials/pager.blade.php` is written here rather than published from the framework, and the view hands
+it a closure that builds the link. Both choices are about this board's shape — `->links()` renders a
+Tailwind view and there is no Tailwind to render it with, and the paginator's own `url()` builds an
+absolute address out of whatever host the request arrived on. The pager is four ends around one figure:
+`«` to the first page and `»` to the last, `‹ previous` and `next ›` beside them, and whichever of those
+has nowhere to go prints as a dimmed word instead of a link back to the page on screen. A thread of ten
+or fewer prints no pager at all. A reply redirects to the page that holds it, so its author is not sent
+back to replies they have already read; while the thread fits on one page the URL keeps the `page` out
+of it.
+
 ## Project layout
 
 ```
@@ -459,7 +481,7 @@ over tables this small are cheaper than a cache that can report a member who has
 │   ├── users/                # show (one member, avatar at full size), index (the staff roll-call)
 │   ├── auth/                 # login, signup
 │   ├── admin/                # posts, post, comments, users (read-only)
-│   ├── partials/             # avatar-picker (signup + profile), stats (footer)
+│   ├── partials/             # avatar-picker (signup + profile), stats (footer), pager
 │   └── profile.blade.php     # avatar picker and password form, posting separately
 ├── routes/web.php
 └── tests/Feature/            # posts, auth, admin, hashing, import, avatars, member page,
@@ -468,7 +490,7 @@ over tables this small are cheaper than a cache that can report a member who has
 ```
 
 `Post` and `Comment` set `const UPDATED_AT = null` and carry `created_at` alone, `comments()`
-orders by `created_at`, and `password` / `remember_token` stay hidden on the `User` model. `is_staff`
+orders by `created_at` then `id`, and `password` / `remember_token` stay hidden on the `User` model. `is_staff`
 stays out of `#[Fillable]` for the same reason it stays out of a form: nothing a visitor posts may make
 them staff, so the role switch writes it with `forceFill` after its own staff check.
 
@@ -482,7 +504,7 @@ spells the same way in SQL: change one, change the other.
 ## Tests
 
 ```bash
-php artisan test        # 104 feature tests
+php artisan test        # 111 feature tests
 vendor/bin/pint --test  # style
 ```
 
@@ -509,8 +531,9 @@ machine can look at the board. The things that would actually bite:
 
 ## Not included
 
-- Pagination, edit history, nested replies, markdown, attachments. The avatar upload is the one file
-  the board accepts, and it is resized to 100x100 rather than stored as sent.
+- Paged topic lists. `/` and `/admin` still answer the whole board in one page — the paging here is the
+  ten replies to a thread. Also absent: edit history, nested replies, markdown, attachments. The avatar
+  upload is the one file the board accepts, and it is resized to 100x100 rather than stored as sent.
 - Password reset and e-mail verification.
 - A blocklist of known-leaked passwords. Laravel ships none, and copying a file of about twenty
   thousand of them into a toy board is a thing this repo should not grow; `PasswordRequest` checks

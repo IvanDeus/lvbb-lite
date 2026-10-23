@@ -17,7 +17,13 @@ starter kit, no Node build step, no Tailwind.
 - **Feature tests must survive a populated database.** They run against the live board, so never assert
   an absolute count, a "nothing here yet" message, or a URL with a host in it — a test request's host
   is `http://localhost` while the running server's is not. Assert the *change* a request made, render
-  a partial directly to check its wording, and build HTML needles from `route(...)`.
+  a partial directly to check its wording, and build HTML needles from `route(...)`. A paged list over a
+  whole table is the sharpest case: `/admin/comments` holds every reply the board has, so the test stamps
+  its own rows `now()->subYears(200)` — older than anything the board can hold, which makes page one
+  theirs without counting anyone else's. A reply dated `now()` is the opposite case and the worse trap:
+  on an oldest-first list it lands on the **last** page, so a needle for it passes only while the board
+  happens to hold ten replies or fewer — one such test here went green for weeks and broke the moment
+  real replies pushed it off page one.
 - **Keep `PDO::ATTR_EMULATE_PREPARES => true`** in the pgsql connection. Neon's pooled endpoint is
   PgBouncer in transaction mode; with native prepared statements the second statement inside a
   transaction fails with `SQLSTATE[25P02]` and migrations break.
@@ -86,6 +92,20 @@ starter kit, no Node build step, no Tailwind.
   it saturates a 20-digit id at `PHP_INT_MAX`, so oversized ids stay missing posts rather than
   Postgres out-of-range errors. `/user/{username}` is the opposite case on purpose — `firstOrFail()`,
   because there is no missing-member template.
+- **Every comment list is ten to a page, oldest first.** `Comment::PER_PAGE` is the number and
+  `Comment::paginateWithin()` is the only way to ask for a page of it: it clamps the requested page into
+  the range that exists *before* running the query, because `?page=99` on a three-reply thread otherwise
+  answers an empty list under "No comments yet." plus a label reading "page 99 of 2". `Post::comments()`
+  orders by `created_at` **and `id`** — a comment has no `updated_at`, so a same-instant pair would
+  otherwise drift across a page boundary; `/admin/comments` reads `oldest('created_at')` for the same
+  reason. `partials/pager.blade.php` is hand-rolled and is handed a `$link` closure rather than
+  `->links()`, which renders a Tailwind view this board has no CSS for and builds absolute addresses from
+  the request's host. Its four ends are `«` first, `‹ previous`, `next ›`, `»` last, and the one with
+  nowhere to go prints as a `pager-off` word rather than a link back to the page already on screen —
+  `«` on page 1 and `»` on the last. `admin/post.blade.php` counts with `$comments->total()` — `$post->comments->count()`
+  there reports the ten rows on the page. `storeComment` redirects to `Comment::lastPage(...)` so the
+  writer lands on the reply they just made, and leaves `page` out of the URL while one page is all there
+  is. Nothing else is paged: `/` and `/admin` still answer the whole board at once.
 - The e-mail line on a member page renders from `$request->user()?->is_staff` and nothing else. Avatars
   link there from the index and from a thread; that is the only place a board reader can reach a
   profile that is not their own.
@@ -121,7 +141,7 @@ starter kit, no Node build step, no Tailwind.
 
 ```bash
 php artisan serve --host=127.0.0.1 --port=7112   # dev server (0.0.0.0 to answer on every interface)
-php artisan test                                 # 104 feature tests, against the configured database
+php artisan test                                 # 111 feature tests, against the configured database
 vendor/bin/pint                                  # fix style (pint --test to check)
 php artisan migrate                              # apply the migrations to Neon or to a local cluster
 ```
